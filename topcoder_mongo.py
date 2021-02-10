@@ -35,7 +35,7 @@ class TopcoderMongo:
     project = get_collection('project')
 
     @classmethod
-    def run_challenge_aggregation(self, query: typing.List[dict]):
+    def run_challenge_aggregation(self, query: list[dict]) -> typing.Any:
         """ Run mongo aggregation"""
         try:
             result = self.challenge.aggregate(query)
@@ -46,7 +46,7 @@ class TopcoderMongo:
             return result
 
     @classmethod
-    def run_project_aggregation(self, query: typing.List[dict]):
+    def run_project_aggregation(self, query: list[dict]) -> typing.Any:
         """ Run mongo aggregation"""
         try:
             result = self.project.aggregate(query)
@@ -57,7 +57,7 @@ class TopcoderMongo:
             return result
 
     @classmethod
-    def get_challenge_count(cls, granularity: str = 'year', fmt: str = '%Y', status_filter: list[str] = S.STATUS):
+    def get_challenge_count(cls, granularity: str = 'year', fmt: str = '%Y', status_filter: list[str] = S.STATUS) -> list[dict]:
         """ Get the overview count of challenges by year/month/other granularity."""
         query = [
             {'$match': {'end_date': {'$lte': U.year_end(2020)}}},
@@ -85,7 +85,7 @@ class TopcoderMongo:
         return result
 
     @classmethod
-    def get_cancelled_challenges_count(cls, granularity: str = 'year', fmt: str = '%Y'):
+    def get_cancelled_challenges_count(cls, granularity: str = 'year', fmt: str = '%Y') -> list[dict]:
         """ Get only Cancelled challenge."""
         query = [
             {'$match': {'status': {'$regex': re.compile(r'^Cancelled')}}},
@@ -104,3 +104,14 @@ class TopcoderMongo:
         result = cls.challenge.aggregate(query)
 
         return list(result)
+
+    @classmethod
+    def get_project_section_similarity(cls) -> list[dict]:
+        """ Get project common section similarity."""
+        query = [
+            {'$project': {'id': True, 'section_similarity': True}},
+            {'$unwind': '$section_similarity'},
+            {'$replaceRoot': {'newRoot': {'$mergeObjects': [{'project_id': '$id'}, '$section_similarity']}}},
+        ]
+
+        return list(cls.project.aggregate(query))
