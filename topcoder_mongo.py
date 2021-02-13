@@ -3,11 +3,13 @@ import re
 import typing
 import pymongo
 import pymongo.errors
+import pymongo.cursor
 import pymongo.database
 import pymongo.collection
 import static_var as S
 import util as U
 from pprint import pprint
+from collections.abc import Sequence
 from dateutil.parser import isoparse
 
 
@@ -25,6 +27,7 @@ def connect() -> pymongo.database.Database:
 
 
 def get_collection(collection_name: str) -> pymongo.collection.Collection:
+    """ Get the collection by collection name."""
     database = connect()
     return database.get_collection(collection_name)
 
@@ -33,6 +36,21 @@ class TopcoderMongo:
     """ Retrieve data from MongoDB."""
     challenge = get_collection('challenge')
     project = get_collection('project')
+
+    scoped_challenge_query = [  # This query select the 5,996 challenge fall into the scope
+        {'$match': {
+            'status': 'Completed',
+            'track': 'Development',
+            'type': 'Challenge',
+            'end_date': {'$lte': U.year_end(2020)},
+            'legacy.sub_track': {'$exists': True},
+            'project_id': {'$ne': None},
+        }},
+        {'$unwind': '$prize_sets'},
+        {'$match': {'prize_sets.type': 'placement'}},
+        {'$set': {'num_of_placements': {'$size': '$prize_sets.prizes'}}},
+        {'$match': {'num_of_placements': {'$gt': 0}}},
+    ]
 
     @classmethod
     def run_challenge_aggregation(self, query: list[dict]) -> typing.Any:
@@ -115,3 +133,85 @@ class TopcoderMongo:
         ]
 
         return list(cls.project.aggregate(query))
+
+    @classmethod
+    def get_tagged_projects(cls, interval_points: list[int] = [0, 10, 50, 100]) -> pymongo.cursor.Cursor:
+        """ Return a cursor (iterable) for tagged projects."""
+        intervals = zip(interval_points, [i - 1 for i in interval_points[1:]])
+        branch_query = [
+            {
+                'case': {'$and': [
+                    {'$gte': ['$num_of_challenge', intv_start]},
+                    {'$lte': ['$num_of_challenge', intv_end]}]},
+                'then': f'{intv_start}~{intv_end}'
+            } for intv_start, intv_end in intervals
+        ]
+        branch_query.append({
+            'case': {'$gte': ['$num_of_challenge', interval_points[-1]]},
+            'then': f'>={interval_points[-1]}'}
+        )
+
+        query = [
+            {'$match': {'$expr': {'$in': ['Development', '$tracks']}}},
+            {'$unwind': '$num_of_challenge'},
+            {'$match': {'num_of_challenge.track': 'Development'}},
+            {'$unwind': '$completion_ratio'},
+            {'$match': {'completion_ratio.track': 'Development'}},
+            {
+                '$set': {
+                    'dev_cha_lst': {
+                        '$filter': {
+                            'input': '$challenge_lst',
+                            'as': 'cha',
+                            'cond': {'$eq': ['$$cha.track', 'Development']},
+                        },
+                    },
+                    'num_of_comp_dev_challenge': {  # number of completed development challenge
+                        '$size': {
+                            '$filter': {
+                                'input': '$challenge_lst',
+                                'as': 'cha',
+                                'cond': {'$and': [{'$eq': ['$$cha.track', 'Development']}, {'$eq': ['$$cha.status', 'Completed']}]},
+                            }
+                        },
+                    },
+                },
+            },
+            {
+                '$project': {
+                    'num_of_challenge': '$num_of_challenge.count',
+                    'completion_ratio': '$completion_ratio.ratio',
+                    'num_of_comp_dev_challenge': True,
+                    'challenge_lst': '$dev_cha_lst.id',
+                }
+            },
+            {'$set': {'num_of_cha_range': {'$switch': {'branches': branch_query}}}},
+            {
+                '$group': {
+                    '_id': '$num_of_cha_range',
+                    'num_of_project': {'$sum': 1},
+                    'num_of_challenge': {'$sum': '$num_of_challenge'},
+                    'num_of_comp_challenge': {'$sum': '$num_of_comp_dev_challenge'},
+                    'avg_completion_ratio': {'$avg': '$completion_ratio'},
+                    'all_challenge_lst': {'$push': '$challenge_lst'}
+                },
+            },
+            {
+                '$project': {
+                    'tag': '$_id',
+                    'num_of_project': True,
+                    'num_of_challenge': True,
+                    'num_of_comp_challenge': True,
+                    'avg_completion_ratio': {'$round': ['$avg_completion_ratio', 3]},
+                    'challenge_lst': {
+                        '$reduce': {
+                            'input': '$all_challenge_lst',
+                            'initialValue': [],
+                            'in': {'$concatArrays': ['$$value', '$$this']}
+                        }
+                    }
+                },
+            },
+            {'$project': {'_id': False}}
+        ]
+        return cls.project.aggregate(query)
