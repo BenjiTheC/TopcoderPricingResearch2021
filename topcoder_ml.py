@@ -2,6 +2,8 @@
 import pathlib
 import itertools
 from collections.abc import Iterable
+
+import numpy as np
 from gensim import corpora, models, similarities
 
 import topcoder_mongo as DB
@@ -89,3 +91,7 @@ def challenge_tag_word2vec():
 
     return tag_count, challenge_tags, word2vec
 
+
+def softmax(x: np.ndarray):
+    """ Compute softmax values for the array."""
+    return np.exp(x) / np.sum(np.exp(x))

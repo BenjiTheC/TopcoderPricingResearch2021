@@ -34,3 +34,9 @@ def year_start(year: int) -> datetime:
 def year_end(year: int) -> datetime:
     """ Return end of the year."""
     return datetime(year, 12, 31, 23, 59, 59, 999999, timezone.utc)
+
+def replace_word_by_keyword(keyword: str, replacement: str, target_lst: list[str]) -> list[str]:
+    """ Replace a string element in the `target_lst` with `replacement` str if the
+        element contains `keyword` string.
+    """
+    return [replacement if keyword.lower() in el.lower() else el for el in target_lst]

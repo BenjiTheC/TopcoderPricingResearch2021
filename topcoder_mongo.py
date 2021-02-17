@@ -6,10 +6,12 @@ import pymongo.errors
 import pymongo.cursor
 import pymongo.database
 import pymongo.collection
+import pandas as pd
+import numpy as np
+import topcoder_feature_engineering as FE
 import static_var as S
 import util as U
 from pprint import pprint
-from collections.abc import Sequence
 from dateutil.parser import isoparse
 
 
@@ -36,8 +38,9 @@ class TopcoderMongo:
     """ Retrieve data from MongoDB."""
     challenge = get_collection('challenge')
     project = get_collection('project')
+    feature = get_collection('feature')
 
-    scoped_challenge_query = [  # This query select the 5,996 challenge fall into the scope
+    scoped_challenge_query = [  # This query select the 5,996 challenges fall into the scope
         {'$match': {
             'status': 'Completed',
             'track': 'Development',
@@ -50,6 +53,19 @@ class TopcoderMongo:
         {'$match': {'prize_sets.type': 'placement'}},
         {'$set': {'num_of_placements': {'$size': '$prize_sets.prizes'}}},
         {'$match': {'num_of_placements': {'$gt': 0}}},
+    ]
+
+    scoped_challenge_with_text_query = [  # This query select the 3,316 challenges fall into the scope
+        *scoped_challenge_query,
+        {'$set': {'filtered_processed_desc': {
+            '$filter': {
+                'input': '$processed_description',
+                'as': 'desc',
+                'cond': {'$not': [{'$in': ['$$desc.name', ['Final Submission Guidelines', 'Payments']]}]},
+            }
+        }}},
+        {'$set': {'size_of_filtered_processed_desc': {'$size': '$filtered_processed_desc'}}},
+        {'$match': {'size_of_filtered_processed_desc': {'$gt': 0}}},
     ]
 
     @classmethod
@@ -135,8 +151,11 @@ class TopcoderMongo:
         return list(cls.project.aggregate(query))
 
     @classmethod
-    def get_tagged_projects(cls, interval_points: list[int] = [0, 10, 50, 100]) -> pymongo.cursor.Cursor:
-        """ Return a cursor (iterable) for tagged projects."""
+    def get_project_scale(cls, interval_points: list[int] = [0, 10, 50, 100]) -> pymongo.cursor.Cursor:
+        """ Return a cursor (iterable) for tagged projects.
+            This function take ONLY Dvelopment track challenge into consideration.
+            And capitalized words 'Challenge' 'First2Finish' 'Task' stand for challenge type.
+        """
         intervals = zip(interval_points, [i - 1 for i in interval_points[1:]])
         branch_query = [
             {
@@ -166,22 +185,52 @@ class TopcoderMongo:
                             'cond': {'$eq': ['$$cha.track', 'Development']},
                         },
                     },
-                    'num_of_comp_dev_challenge': {  # number of completed development challenge
+                    'num_of_completed': {  # number of completed development challenge
                         '$size': {
                             '$filter': {
                                 'input': '$challenge_lst',
                                 'as': 'cha',
-                                'cond': {'$and': [{'$eq': ['$$cha.track', 'Development']}, {'$eq': ['$$cha.status', 'Completed']}]},
+                                'cond': {'$and': [
+                                    {'$eq': ['$$cha.status', 'Completed']},
+                                    {'$eq': ['$$cha.track', 'Development']},
+                                ]},
                             }
                         },
                     },
+                    **{f'num_of_completed_{challenge_type}': {
+                        '$size': {
+                            '$filter': {
+                                'input': '$challenge_lst',
+                                'as': 'cha',
+                                'cond': {'$and': [
+                                    {'$eq': ['$$cha.status', 'Completed']},
+                                    {'$eq': ['$$cha.track', 'Development']},
+                                    {'$eq': ['$$cha.type', challenge_type]},
+                                ]}
+                            }
+                        }
+                    } for challenge_type in S.TYPE},
+                    **{f'num_of_{challenge_type}': {
+                        '$size': {
+                            '$filter': {
+                                'input': '$challenge_lst',
+                                'as': 'cha',
+                                'cond': {'$and': [
+                                    {'$eq': ['$$cha.track', 'Development']},
+                                    {'$eq': ['$$cha.type', challenge_type]},
+                                ]}
+                            }
+                        }
+                    } for challenge_type in S.TYPE},
                 },
             },
             {
                 '$project': {
                     'num_of_challenge': '$num_of_challenge.count',
                     'completion_ratio': '$completion_ratio.ratio',
-                    'num_of_comp_dev_challenge': True,
+                    'num_of_completed': True,
+                    **{f'num_of_completed_{challenge_type}': True for challenge_type in S.TYPE},
+                    **{f'num_of_{challenge_type}': True for challenge_type in S.TYPE},
                     'challenge_lst': '$dev_cha_lst.id',
                 }
             },
@@ -191,7 +240,13 @@ class TopcoderMongo:
                     '_id': '$num_of_cha_range',
                     'num_of_project': {'$sum': 1},
                     'num_of_challenge': {'$sum': '$num_of_challenge'},
-                    'num_of_comp_challenge': {'$sum': '$num_of_comp_dev_challenge'},
+                    'num_of_completed': {'$sum': '$num_of_completed'},
+                    **{f'num_of_completed_{challenge_type}': {
+                        '$sum': f'$num_of_completed_{challenge_type}'
+                    } for challenge_type in S.TYPE},
+                    **{f'num_of_{challenge_type}': {
+                        '$sum': f'$num_of_{challenge_type}'
+                    } for challenge_type in S.TYPE},
                     'avg_completion_ratio': {'$avg': '$completion_ratio'},
                     'all_challenge_lst': {'$push': '$challenge_lst'}
                 },
@@ -201,7 +256,9 @@ class TopcoderMongo:
                     'tag': '$_id',
                     'num_of_project': True,
                     'num_of_challenge': True,
-                    'num_of_comp_challenge': True,
+                    'num_of_completed': True,
+                    **{f'num_of_completed_{challenge_type}': True for challenge_type in S.TYPE},
+                    **{f'num_of_{challenge_type}': True for challenge_type in S.TYPE},
                     'avg_completion_ratio': {'$round': ['$avg_completion_ratio', 3]},
                     'challenge_lst': {
                         '$reduce': {
@@ -212,6 +269,47 @@ class TopcoderMongo:
                     }
                 },
             },
+            {'$sort': {'tag': pymongo.ASCENDING}},
             {'$project': {'_id': False}}
         ]
         return cls.project.aggregate(query)
+
+    @classmethod
+    def write_prize_target(cls) -> None:
+        """ Write the training target Challenge top2 prize."""
+        query = [
+            *cls.scoped_challenge_with_text_query,
+            {'$unwind': '$prize_sets'},
+            {'$match': {'prize_sets.type': 'placement'}},
+            {'$project': {
+                '_id': False,
+                'id': True,
+                'top2_prize': {'$sum': {'$slice': ['$prize_sets.prizes.value', 2]}},
+            }},
+        ]
+        for challenge in cls.challenge.aggregate(query):
+            cls.feature.update_one(
+                {'id': challenge['id']},
+                {'$set': {'id': challenge['id'], 'top2_prize': challenge['top2_prize']}},
+                upsert=True,
+            )
+
+    @classmethod
+    def write_tag_feature(cls) -> None:
+        """ Write the engineered feature into database."""
+        tag_feature: pd.DataFrame = pd.DataFrame.from_records(FE.compute_tag_feature())
+        for _, row in tag_feature.iterrows():
+            cls.feature.update_one(
+                {'id': row['id']},
+                {'$set': {
+                    'id': row['id'],
+                    'softmax': row.reindex([f'tag_comb{i}_softmax_score' for i in range(1, 5)]).tolist(),
+                    'one_hot': np.concatenate(row.reindex(
+                        [f'tag_comb{i}_one_hot_array' for i in range(1, 5)]).to_numpy()).tolist(),
+                }},
+                upsert=True,
+            )
+
+
+if __name__ == '__main__':
+    TopcoderMongo.write_prize_target()
