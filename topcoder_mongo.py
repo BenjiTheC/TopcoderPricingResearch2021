@@ -141,7 +141,7 @@ class TopcoderMongo:
 
     @classmethod
     def get_project_section_similarity(cls) -> list[dict]:
-        """ Get project common section similarity."""
+        """ Get project common section similarity table for display."""
         query = [
             {'$project': {'id': True, 'section_similarity': True}},
             {'$unwind': '$section_similarity'},
@@ -149,6 +149,36 @@ class TopcoderMongo:
         ]
 
         return list(cls.project.aggregate(query))
+
+    @classmethod
+    def get_project_repeated_sections(
+        cls,
+        similarity_threshold: float = 1.1,
+        frequency_threshold: float = 1.1,
+    ) -> dict[str: list[str]]:
+        """ Get the project section names by frequency and similarity threshold
+            for conostructing challenge description
+        """
+        query = [
+            {'$project': {'id': True, 'section_similarity': True}},
+            {'$unwind': '$section_similarity'},
+            {'$replaceRoot': {'newRoot': {'$mergeObjects': [{'project_id': '$id'}, '$section_similarity']}}},
+            {'$match': {
+                'similarity': {'$gte': similarity_threshold},
+                'frequency': {'$gte': frequency_threshold},
+                'name': {'$not': {'$in': ['Final Submission Guidelines', 'Payments']}},
+            }},
+            {'$group': {
+                '_id': {'project_id': '$project_id'},
+                'names': {'$push': '$name'},
+            }},
+            {'$replaceRoot': {'newRoot': {'$mergeObjects': [
+                '$_id',
+                {'names': '$names'},
+            ]}}},
+        ]
+
+        return {proj['project_id']: proj['names'] for proj in cls.project.aggregate(query)}
 
     @classmethod
     def get_project_scale(cls, interval_points: list[int] = [0, 10, 50, 100]) -> pymongo.cursor.Cursor:
@@ -275,6 +305,65 @@ class TopcoderMongo:
         return cls.project.aggregate(query)
 
     @classmethod
+    def get_challenge_description(
+        cls,
+        similarity_threshold: typing.Optional[float] = None,
+        frequency_threshold: typing.Optional[float] = None,
+    ) -> pymongo.cursor.Cursor:
+        """ Retrieve the challenge description text paragraph from filtered processed description section."""
+        project_section_names = cls.get_project_repeated_sections(similarity_threshold, frequency_threshold)
+        scoped_project_section_names: dict[str, list[str]] = {
+            project['project_id']: project_section_names.get(project['project_id'], [])
+            for project in cls.challenge.aggregate([
+                *cls.scoped_challenge_with_text_query,
+                {'$group': {'_id': None, 'project_id': {'$addToSet': '$project_id'}}},
+                {'$unwind': '$project_id'},
+                {'$project': {'_id': False}},
+            ])
+        }
+
+        facet_query = {'$facet': {str(proj_id): [
+            {'$match': {'project_id': proj_id}},
+            {'$project': {
+                '_id': False, 'id': True,
+                'processed_paragraph': {
+                    '$reduce': {
+                        'input': {
+                            '$map': {
+                                'input': {
+                                    '$filter': {
+                                        'input': '$filtered_processed_desc',
+                                        'as': 'fpd',
+                                        'cond': {'$not': [{'$in': ['$$fpd.name', section_names]}]},
+                                    },
+                                },
+                                'as': 'fpd',
+                                'in': {'$concat': [
+                                    {'$cond': [{'$eq': ['$$fpd.name', 'null']}, '', '$$fpd.name']},
+                                    '$$fpd.text',
+                                ]},
+                            },
+                        },
+                        'initialValue': '',
+                        'in': {'$concat': ['$$value', '$$this']},
+                    }
+                }
+            }},
+        ] for proj_id, section_names in scoped_project_section_names.items()}}
+
+        facet_unpack_query = [
+            {'$project': {'tmp_root': {'$setUnion': [f'${proj_id}' for proj_id in scoped_project_section_names]}}},
+            {'$unwind': '$tmp_root'},
+            {'$replaceRoot': {'newRoot': '$tmp_root'}},
+        ]
+
+        return cls.challenge.aggregate([
+            *cls.scoped_challenge_with_text_query,
+            facet_query,
+            *facet_unpack_query,
+        ])
+
+    @classmethod
     def write_prize_target(cls) -> None:
         """ Write the training target Challenge top2 prize."""
         query = [
@@ -312,4 +401,5 @@ class TopcoderMongo:
 
 
 if __name__ == '__main__':
+    TopcoderMongo.write_tag_feature()
     TopcoderMongo.write_prize_target()

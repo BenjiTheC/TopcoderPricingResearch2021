@@ -1,10 +1,15 @@
 """ Some logic that's meant to run in the jupyter notebook."""
+import typing
+import pathlib
 import itertools
 import numpy as np
 import pandas as pd
+import static_var as S
 import topcoder_ml as TML
 import topcoder_mongo as DB
 from collections.abc import Iterator
+from gensim.utils import simple_preprocess
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 
 
 def get_challenge_tag_combination_count() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -51,7 +56,7 @@ def get_tag_combination_softmax() -> list[pd.DataFrame]:
     return [compute_softmax(tag_combination) for tag_combination in get_challenge_tag_combination_count()]
 
 
-def compute_tag_feature():
+def compute_tag_feature() -> list[dict]:
     """ Use the tag combination softmax table to caluate the softmax score of a
         challenge's tags. And encode the binary array.
     """
@@ -77,3 +82,38 @@ def compute_tag_feature():
         return feature_dct
 
     return [{**cha, **map_tag_lst_to_softmax(cha['tags'])} for cha in challenge_tag]
+
+
+def compute_description_doc2vec(
+    similarity_threshold: typing.Optional[float] = None,
+    frequency_threshold: typing.Optional[float] = None,
+    token_len_threshold: int = 0,
+) -> list[dict]:
+    """ Retrieve challenge description from meaningful processed description."""
+    challenge_description = pd.DataFrame.from_records(
+        DB.TopcoderMongo.get_challenge_description(similarity_threshold, frequency_threshold)
+    )
+    challenge_description['tokens'] = challenge_description['processed_paragraph'].apply(simple_preprocess)
+
+    corpus = [
+        TaggedDocument(words=row.tokens, tags=[row.id])
+        for row in (challenge_description
+                    .loc[challenge_description['tokens'].apply(lambda t: len(t)) > token_len_threshold]
+                    .itertuples())
+    ]
+
+    model_path: pathlib.Path = (
+        S.MODEL_PATH / 
+        ('challenge_desc_docvecs_' +
+            f'sim{similarity_threshold}freq{frequency_threshold}tkl{token_len_threshold}')
+    )
+
+    if model_path.exists():
+        return Doc2Vec.load(str(model_path.resolve())), corpus
+
+    model = Doc2Vec(vector_size=100, min_count=5, epochs=10)
+    model.build_vocab(corpus)
+    model.train(corpus, total_examples=model.corpus_count, epochs=model.epochs)
+    model.save(str(model_path.resolve()))
+
+    return model, corpus

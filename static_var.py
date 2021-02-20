@@ -3,6 +3,7 @@ import pathlib
 from collections import namedtuple
 
 DATA_PATH = pathlib.Path('data')
+MODEL_PATH = pathlib.Path('models')
 
 # Hardcode the mongoDB info here, .env or other environmental variable should be used for remote database
 MongoConfig = namedtuple('MongoConfig', ['host', 'port', 'database'])
