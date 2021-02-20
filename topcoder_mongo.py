@@ -399,7 +399,33 @@ class TopcoderMongo:
                 upsert=True,
             )
 
+    @classmethod
+    def write_docvec_feature(
+        cls,
+        similarity_threshold: typing.Optional[float] = None,
+        frequency_threshold: typing.Optional[float] = None,
+        token_len_threshold: int = 0,
+    ) -> None:
+        """ Write the engineered challenge docvec into database."""
+        challenge_desc_docvecs = FE.compute_challenge_desc_docvec(
+            similarity_threshold,
+            frequency_threshold,
+            token_len_threshold,
+        )
+
+        for cha_id, cha_docvec in challenge_desc_docvecs.items():
+            cls.feature.update_one(
+                {'id': cha_id},
+                {'$set': {
+                    'id': cha_id,
+                    f'docvec_sim{similarity_threshold}freq{frequency_threshold}tkl{token_len_threshold}': cha_docvec
+                }},
+                upsert=True,
+            )
+
 
 if __name__ == '__main__':
-    TopcoderMongo.write_tag_feature()
-    TopcoderMongo.write_prize_target()
+    # TopcoderMongo.write_tag_feature()
+    # TopcoderMongo.write_prize_target()
+    # TopcoderMongo.write_docvec_feature()
+    pass

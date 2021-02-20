@@ -84,11 +84,11 @@ def compute_tag_feature() -> list[dict]:
     return [{**cha, **map_tag_lst_to_softmax(cha['tags'])} for cha in challenge_tag]
 
 
-def compute_description_doc2vec(
+def train_challenge_desc_doc2vec(
     similarity_threshold: typing.Optional[float] = None,
     frequency_threshold: typing.Optional[float] = None,
     token_len_threshold: int = 0,
-) -> list[dict]:
+) -> tuple[Doc2Vec, list[TaggedDocument]]:
     """ Retrieve challenge description from meaningful processed description."""
     challenge_description = pd.DataFrame.from_records(
         DB.TopcoderMongo.get_challenge_description(similarity_threshold, frequency_threshold)
@@ -117,3 +117,15 @@ def compute_description_doc2vec(
     model.save(str(model_path.resolve()))
 
     return model, corpus
+
+
+def compute_challenge_desc_docvec(
+    similarity_threshold: typing.Optional[float] = None,
+    frequency_threshold: typing.Optional[float] = None,
+    token_len_threshold: int = 0,
+) -> dict[str, list]:
+    """ Compute the document vector representation of a challenge description with
+        given similarity, frequency and token length threshold.
+    """
+    model, corpus = train_challenge_desc_doc2vec(similarity_threshold, frequency_threshold, token_len_threshold)
+    return {doc.tags[0]: model.docvecs[doc.tags[0]].tolist() for doc in corpus}
