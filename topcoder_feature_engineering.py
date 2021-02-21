@@ -8,6 +8,7 @@ import static_var as S
 import topcoder_ml as TML
 import topcoder_mongo as DB
 from collections.abc import Iterator
+from pandas.api.types import CategoricalDtype
 from gensim.utils import simple_preprocess
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 
@@ -129,3 +130,55 @@ def compute_challenge_desc_docvec(
     """
     model, corpus = train_challenge_desc_doc2vec(similarity_threshold, frequency_threshold, token_len_threshold)
     return {doc.tags[0]: model.docvecs[doc.tags[0]].tolist() for doc in corpus}
+
+
+def compute_challenge_metadata():
+    """ Compute challenge metadata:
+        - Challenge duration (by full days)
+        - Project id (categorically encoded)
+        - Legacy sub track (categorically encoded)
+    """
+    proj_id_query = [
+        *DB.TopcoderMongo.scoped_challenge_with_text_query,
+        {'$group': {'_id': None, 'project_ids': {'$addToSet': '$project_id'}}},
+    ]
+    sub_track_query = [
+        {'$match': {'legacy.track': 'DEVELOP'}},
+        {'$group': {'_id': None, 'legacy_sub_tracks': {'$addToSet': '$legacy.sub_track'}}},
+    ]
+    project_ids = next(
+        DB.TopcoderMongo.run_challenge_aggregation(proj_id_query)
+    )['project_ids']
+    sub_tracks = next(
+        (DB.TopcoderMongo
+            .run_challenge_aggregation(sub_track_query))
+    )['legacy_sub_tracks']
+
+    project_id_cat = CategoricalDtype(sorted(project_ids))
+    sub_track_cat = CategoricalDtype(sorted(sub_tracks))
+
+    challenge_metadata_query = [
+        *DB.TopcoderMongo.scoped_challenge_with_text_query,
+        {'$project': {
+            '_id': False, 'id': True, 'project_id': True,
+            'legacy_sub_track': '$legacy.sub_track',
+            'duration': {'$toInt': {
+                '$divide': [
+                    {'$subtract': ['$end_date', '$start_date']},
+                    24 * 60 * 60 * 1000,
+                ],
+            }},
+        }},
+    ]
+    challenge_metadata = (pd.DataFrame
+                            .from_records(
+                                DB.TopcoderMongo.run_challenge_aggregation(challenge_metadata_query)
+                            ).astype({
+                                'project_id': project_id_cat,
+                                'legacy_sub_track': sub_track_cat
+                            }))
+
+    challenge_metadata['project_id_encode'] = challenge_metadata['project_id'].cat.codes
+    challenge_metadata['legacy_sub_track_encode'] = challenge_metadata['legacy_sub_track'].cat.codes
+
+    return challenge_metadata

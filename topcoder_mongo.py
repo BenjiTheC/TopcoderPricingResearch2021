@@ -423,9 +423,24 @@ class TopcoderMongo:
                 upsert=True,
             )
 
+    @classmethod
+    def write_metadata_feature(cls):
+        """ Write the engineered metadata feature into database."""
+        challenge_metadata = FE.compute_challenge_metadata()
+        for row in challenge_metadata.itertuples(index=False):
+            cls.feature.update_one(
+                {'id': row.id},
+                {'$set': {
+                    'id': row.id,
+                    'metadata': [row.duration, row.project_id_encode, row.legacy_sub_track_encode],
+                }},
+                upsert=True,
+            )
+
 
 if __name__ == '__main__':
     # TopcoderMongo.write_tag_feature()
     # TopcoderMongo.write_prize_target()
     # TopcoderMongo.write_docvec_feature()
+    # TopcoderMongo.write_metadata_feature()
     pass
