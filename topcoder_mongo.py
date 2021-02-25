@@ -48,6 +48,7 @@ class TopcoderMongo:
             'end_date': {'$lte': U.year_end(2020)},
             'legacy.sub_track': {'$exists': True},
             'project_id': {'$ne': None},
+            '$expr': {'$lte': ['$start_date', '$end_date']},
         }},
         {'$unwind': '$prize_sets'},
         {'$match': {'prize_sets.type': 'placement'}},
@@ -364,6 +365,15 @@ class TopcoderMongo:
         ])
 
     @classmethod
+    def write_training_feature(cls) -> None:
+        """ Bundle the writing method for `feature` collections."""
+        cls.feature.drop()
+        cls.write_prize_target()
+        cls.write_tag_feature()
+        cls.write_docvec_feature()
+        cls.write_metadata_feature()
+
+    @classmethod
     def write_prize_target(cls) -> None:
         """ Write the training target Challenge top2 prize."""
         query = [
@@ -424,7 +434,7 @@ class TopcoderMongo:
             )
 
     @classmethod
-    def write_metadata_feature(cls):
+    def write_metadata_feature(cls) -> None:
         """ Write the engineered metadata feature into database."""
         challenge_metadata = FE.compute_challenge_metadata()
         for row in challenge_metadata.itertuples(index=False):
@@ -437,10 +447,15 @@ class TopcoderMongo:
                 upsert=True,
             )
 
+    @classmethod
+    def write_competing_challenges(cls):
+        """ Write the competing challenge id list and number of competing challenges into database.
+            This method takes longer to run than it looks ;-)
+        """
+        for challenge in FE.compute_competing_challenges():
+            cls.feature.update_one({'id': challenge['id']}, {'$set': challenge}, upsert=True)
+
 
 if __name__ == '__main__':
-    # TopcoderMongo.write_tag_feature()
-    # TopcoderMongo.write_prize_target()
-    # TopcoderMongo.write_docvec_feature()
-    # TopcoderMongo.write_metadata_feature()
-    pass
+    # TopcoderMongo.write_training_feature()
+    TopcoderMongo.write_competing_challenges()

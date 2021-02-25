@@ -30,7 +30,7 @@ def get_challenge_tag_combination_count() -> tuple[pd.DataFrame, pd.DataFrame, p
         return tag_combinatio_count.loc[tag_combinatio_count['tag'].astype(bool)].reset_index(drop=True)
 
     challenge_tags_cursor = DB.TopcoderMongo.run_challenge_aggregation([
-        *DB.TopcoderMongo.scoped_challenge_query,
+        *DB.TopcoderMongo.scoped_challenge_with_text_query,
         {'$project': {'tags': True, '_id': False}},
     ])
 
@@ -182,3 +182,45 @@ def compute_challenge_metadata():
     challenge_metadata['legacy_sub_track_encode'] = challenge_metadata['legacy_sub_track'].cat.codes
 
     return challenge_metadata
+
+
+def compute_competing_challenges():
+    """ For each challenge, find all competing challenges."""
+    challenge_start_end_query = [
+        *DB.TopcoderMongo.scoped_challenge_with_text_query,
+        {'$project': {'_id': False, 'id': True, 'start_date': True, 'end_date': True}},
+    ]
+    challenge_start_end = [
+        (cha['id'], cha['start_date'], cha['end_date'])
+        for cha in DB.TopcoderMongo.run_challenge_aggregation(challenge_start_end_query)
+    ]
+
+    competing_challenge_facet = {'$facet': {cha_id: [
+        {'$match': {
+            'id': {'$ne': cha_id},
+            '$expr': {'$or': [  # Either the start date or end date is in the given challenge's duration.
+                {'$and': [{'$gt': ['$start_date', start_date]}, {'$lt': ['$start_date', end_date]}]},
+                {'$and': [{'$gt': ['$end_date', start_date]}, {'$lt': ['$end_date', end_date]}]},
+            ]},
+        }},
+        {'$group': {'_id': None, 'competing_challenge_ids': {'$push': '$id'}}},
+        {'$project': {
+            '_id': False,
+            'competing_challenge_ids': True,
+            'num_of_competing_challenges': {'$size': '$competing_challenge_ids'},
+        }},
+    ] for cha_id, start_date, end_date in challenge_start_end}}
+
+    # We are not unpacking the facet as there will be challenges with NO competing challenges.
+    get_competing_challenge_query = [
+        *DB.TopcoderMongo.scoped_challenge_with_text_query,
+        competing_challenge_facet,  # This is 5,000+ pipelines in parallel, so it CAN blow the memory out
+    ]
+
+    competing_challenges: dict = list(DB.TopcoderMongo.run_challenge_aggregation(get_competing_challenge_query))[0]
+    empty_competing_cha = {'competing_challenge_ids': [], 'num_of_competing_challenges': 0}
+
+    return [
+        {'id': cha_id, **(empty_competing_cha if competing_cha == [] else competing_cha[0])}
+        for cha_id, competing_cha in competing_challenges.items()
+    ]
