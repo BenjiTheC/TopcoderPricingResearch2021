@@ -9,6 +9,7 @@ from gensim import corpora, models, similarities
 
 import topcoder_mongo as DB
 import util as U
+import static_var as S
 
 def get_ngrams(s: str, n: int) -> list[str]:
     """ Get N-gram from a string."""
@@ -110,7 +111,7 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
             '_id': False, 'id': True,
             'vector': {
                 '$concatArrays': [
-                    '$docvec_simNonefreqNonetkl0',
+                    f'${S.DV_FEATURE_NAME}',
                     '$softmax',
                     '$one_hot',
                     '$metadata',
@@ -152,3 +153,9 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
         selected_feature_and_target.reindex(challenge_feature.columns, axis=1),
         selected_feature_and_target.reindex(['top2_prize'], axis=1),
     )
+
+
+def get_split_data(test_size: float = 0.3):
+    """ Return the **challenge id list** for train-test data set split."""
+    feature, target = get_training_data()
+    target_min, target_max = target['top2_prize'].min(), target['top2_prize'].max()

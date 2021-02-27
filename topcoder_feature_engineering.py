@@ -1,5 +1,4 @@
 """ Some logic that's meant to run in the jupyter notebook."""
-import typing
 import pathlib
 import itertools
 import numpy as np
@@ -85,29 +84,21 @@ def compute_tag_feature() -> list[dict]:
     return [{**cha, **map_tag_lst_to_softmax(cha['tags'])} for cha in challenge_tag]
 
 
-def train_challenge_desc_doc2vec(
-    similarity_threshold: typing.Optional[float] = None,
-    frequency_threshold: typing.Optional[float] = None,
-    token_len_threshold: int = 0,
-) -> tuple[Doc2Vec, list[TaggedDocument]]:
+def train_challenge_desc_doc2vec() -> tuple[Doc2Vec, list[TaggedDocument]]:
     """ Retrieve challenge description from meaningful processed description."""
     challenge_description = pd.DataFrame.from_records(
-        DB.TopcoderMongo.get_challenge_description(similarity_threshold, frequency_threshold)
+        DB.TopcoderMongo.get_challenge_description()
     )
     challenge_description['tokens'] = challenge_description['processed_paragraph'].apply(simple_preprocess)
 
     corpus = [
         TaggedDocument(words=row.tokens, tags=[row.id])
         for row in (challenge_description
-                    .loc[challenge_description['tokens'].apply(lambda t: len(t)) > token_len_threshold]
+                    .loc[challenge_description['tokens'].apply(lambda t: len(t)) > S.DOC2VEC_CONFIG.token_length]
                     .itertuples())
     ]
 
-    model_path: pathlib.Path = (
-        S.MODEL_PATH / 
-        ('challenge_desc_docvecs_' +
-            f'sim{similarity_threshold}freq{frequency_threshold}tkl{token_len_threshold}')
-    )
+    model_path: pathlib.Path = S.MODEL_PATH / S.DV_MODEL_NAME
 
     if model_path.exists():
         return Doc2Vec.load(str(model_path.resolve())), corpus
@@ -120,19 +111,15 @@ def train_challenge_desc_doc2vec(
     return model, corpus
 
 
-def compute_challenge_desc_docvec(
-    similarity_threshold: typing.Optional[float] = None,
-    frequency_threshold: typing.Optional[float] = None,
-    token_len_threshold: int = 0,
-) -> dict[str, list]:
+def compute_challenge_desc_docvec() -> dict[str, list]:
     """ Compute the document vector representation of a challenge description with
         given similarity, frequency and token length threshold.
     """
-    model, corpus = train_challenge_desc_doc2vec(similarity_threshold, frequency_threshold, token_len_threshold)
+    model, corpus = train_challenge_desc_doc2vec()
     return {doc.tags[0]: model.docvecs[doc.tags[0]].tolist() for doc in corpus}
 
 
-def compute_challenge_metadata():
+def compute_challenge_metadata() -> pd.DataFrame:
     """ Compute challenge metadata:
         - Challenge duration (by full days)
         - Project id (categorically encoded)
@@ -184,7 +171,7 @@ def compute_challenge_metadata():
     return challenge_metadata
 
 
-def compute_competing_challenges():
+def compute_competing_challenges() -> list[dict]:
     """ For each challenge, find all competing challenges."""
     challenge_start_end_query = [
         *DB.TopcoderMongo.scoped_challenge_with_text_query,

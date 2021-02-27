@@ -1,4 +1,4 @@
-""" Static variable"""
+""" Static variables"""
 import os
 import pathlib
 from collections import namedtuple
@@ -16,6 +16,23 @@ MONGO_CONFIG = MongoConfig(
     username=os.getenv('MONGO_USER'),
     password=os.getenv('MONGO_PSWD'),
     database=os.getenv("MONGO_DATABASE"),
+)
+
+Doc2VecConfig = namedtuple('Doc2VecConfig', ['similarity', 'frequency', 'token_length'])
+DOC2VEC_CONFIG = Doc2VecConfig(
+    similarity=(os.getenv('CHALLENGE_DESC_SIMILARITY') and float(os.getenv('CHALLENGE_DESC_SIMILARITY'))) or None,
+    frequency=(os.getenv('CHALLENGE_DESC_FREQUENCY') and float(os.getenv('CHALLENGE_DESC_FREQUENCY'))) or None,
+    token_length=(os.getenv('CHALLENGE_DESC_TOKEN_LEN') and int(os.getenv('CHALLENGE_DESC_TOKEN_LEN'))) or 0,
+)
+DV_FEATURE_NAME = 'docvec_sim{similarity}freq{frequency}tkl{token_len}'.format(
+    similarity=DOC2VEC_CONFIG.similarity and int(DOC2VEC_CONFIG.similarity * 100),
+    frequency=DOC2VEC_CONFIG.frequency and int(DOC2VEC_CONFIG.frequency * 100),
+    token_len=DOC2VEC_CONFIG.token_length,
+)
+DV_MODEL_NAME = 'challenge_desc_docvecs_sim{similarity}freq{frequency}tkl{token_len}'.format(
+    similarity=DOC2VEC_CONFIG.similarity,
+    frequency=DOC2VEC_CONFIG.frequency,
+    token_len=DOC2VEC_CONFIG.token_length,
 )
 
 # Some meta data from topcoder.com, manually written here because it's pretty short

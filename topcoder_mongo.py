@@ -86,19 +86,11 @@ class TopcoderMongo:
     ]
 
     @classmethod
-    def filter_valid_docvec_query(
-        cls,
-        similarity_threshold: typing.Optional[float] = None,
-        frequency_threshold: typing.Optional[float] = None,
-        token_len_threshold: int = 0,
-    ):
+    def filter_valid_docvec_query(cls) -> dict:
         """ Query for challenges with valid docvec."""
         return {
             '$match': {
-                (f'docvec_'
-                    f'sim{similarity_threshold and int(similarity_threshold * 100)}'
-                    f'freq{frequency_threshold and int(frequency_threshold * 100)}'
-                    f'tkl{token_len_threshold}'): {'$exists': True},
+                S.DV_FEATURE_NAME: {'$exists': True},
                 'top2_prize': {'$gt': 0},
             },
         }
@@ -351,13 +343,12 @@ class TopcoderMongo:
         return cls.project.aggregate(query)
 
     @classmethod
-    def get_challenge_description(
-        cls,
-        similarity_threshold: typing.Optional[float] = None,
-        frequency_threshold: typing.Optional[float] = None,
-    ) -> pymongo.cursor.Cursor:
+    def get_challenge_description(cls) -> pymongo.cursor.Cursor:
         """ Retrieve the challenge description text paragraph from filtered processed description section."""
-        project_section_names = cls.get_project_repeated_sections(similarity_threshold, frequency_threshold)
+        project_section_names = cls.get_project_repeated_sections(
+            S.DOC2VEC_CONFIG.similarity,
+            S.DOC2VEC_CONFIG.frequency
+        )
         scoped_project_section_names: dict[str, list[str]] = {
             project['project_id']: project_section_names.get(project['project_id'], [])
             for project in cls.challenge.aggregate([
@@ -455,28 +446,16 @@ class TopcoderMongo:
             )
 
     @classmethod
-    def write_docvec_feature(
-        cls,
-        similarity_threshold: typing.Optional[float] = None,
-        frequency_threshold: typing.Optional[float] = None,
-        token_len_threshold: int = 0,
-    ) -> None:
+    def write_docvec_feature(cls) -> None:
         """ Write the engineered challenge docvec into database."""
-        challenge_desc_docvecs = FE.compute_challenge_desc_docvec(
-            similarity_threshold,
-            frequency_threshold,
-            token_len_threshold,
-        )
+        challenge_desc_docvecs = FE.compute_challenge_desc_docvec()
 
         for cha_id, cha_docvec in challenge_desc_docvecs.items():
             cls.feature.update_one(
                 {'id': cha_id},
                 {'$set': {
                     'id': cha_id,
-                    (f'docvec_'
-                        f'sim{similarity_threshold and int(similarity_threshold * 100)}'
-                        f'freq{frequency_threshold and int(frequency_threshold * 100)}'
-                        f'tkl{token_len_threshold}'): cha_docvec
+                    S.DV_FEATURE_NAME: cha_docvec
                 }},
                 upsert=True,
             )
