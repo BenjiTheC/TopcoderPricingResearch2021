@@ -4,6 +4,7 @@ import itertools
 from collections.abc import Iterable
 
 import numpy as np
+import pandas as pd
 from gensim import corpora, models, similarities
 
 import topcoder_mongo as DB
@@ -13,7 +14,7 @@ def get_ngrams(s: str, n: int) -> list[str]:
     """ Get N-gram from a string."""
     return [''.join(gram) for gram in zip(*[s[i:] for i in range(n)])]
 
-def group_challenge_tags():
+def group_challenge_tags() -> tuple[dict, corpora.Dictionary, similarities.SparseMatrixSimilarity]:
     """ Use TF-IDF model to group the tag that are similar.
         Perfect example of over-engineering.
 
@@ -52,7 +53,7 @@ def group_challenge_tags():
     return tag_to_tfidf, grams_to_id, similarity_index
 
 
-def challenge_tag_word2vec():
+def challenge_tag_word2vec() -> tuple[dict, dict, models.Word2Vec]:
     """ Train a Word2Vec model in the fields of challenge tags
         Another perfect example of over engineering
 
@@ -92,6 +93,62 @@ def challenge_tag_word2vec():
     return tag_count, challenge_tags, word2vec
 
 
-def softmax(x: np.ndarray):
+def softmax(x: np.ndarray) -> np.ndarray:
     """ Compute softmax values for the array."""
     return np.exp(x) / np.sum(np.exp(x))
+
+
+def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """ Retrieve engineered feature matrix X and y from database."""
+    challenge_prize_query = [
+        DB.TopcoderMongo.filter_valid_docvec_query(),
+        {'$project': {'_id': False, 'id': True, 'top2_prize': True}},
+    ]
+    challenge_feature_query = [
+        DB.TopcoderMongo.filter_valid_docvec_query(),
+        {'$project': {
+            '_id': False, 'id': True,
+            'vector': {
+                '$concatArrays': [
+                    '$docvec_simNonefreqNonetkl0',
+                    '$softmax',
+                    '$one_hot',
+                    '$metadata',
+                    ['$num_of_competing_challenges'],
+                ],
+            },
+        }},
+    ]
+    challenge_feature_columns = (
+        [f'dv{i}' for i in range(100)] +
+        [f'softmax_c{i + 1}' for i in range(4)] + [f'ohe{i}' for i in range(100)] +
+        ['duration', 'project_id', 'sub_track', 'num_of_competing_challenges'])
+    challenge_prize = (pd.DataFrame
+                        .from_records(DB.TopcoderMongo.run_feature_aggregation(challenge_prize_query))
+                        .set_index('id'))
+    challenge_feature = (pd.DataFrame
+                        .from_records((DB.TopcoderMongo.run_feature_aggregation(challenge_feature_query)))
+                        .set_index('id'))
+    challenge_feature = pd.DataFrame.from_records(
+        data=challenge_feature.vector,
+        index=challenge_feature.index,
+    ).rename(columns=dict(enumerate(challenge_feature_columns)))
+
+    feature_and_target = challenge_feature.join(challenge_prize)
+
+    prize_lower_bound = challenge_prize['top2_prize'].quantile(0.05) 
+    prize_upper_bound = challenge_prize['top2_prize'].quantile(0.95)
+    challenge_by_project_scale: list[str] = (pd.DataFrame.from_records(DB.TopcoderMongo.get_project_scale([0, 10]))
+                                                .set_index('tag')
+                                                .loc['>=10', 'challenge_lst'])
+
+    selected_feature_and_target = feature_and_target.loc[
+        (feature_and_target['top2_prize'] >= prize_lower_bound) &
+        (feature_and_target['top2_prize'] <= prize_upper_bound) &
+        feature_and_target.index.isin(challenge_by_project_scale)
+    ]
+
+    return (
+        selected_feature_and_target.reindex(challenge_feature.columns, axis=1),
+        selected_feature_and_target.reindex(['top2_prize'], axis=1),
+    )

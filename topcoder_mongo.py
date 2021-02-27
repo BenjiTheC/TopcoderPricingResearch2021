@@ -11,6 +11,7 @@ import numpy as np
 import topcoder_feature_engineering as FE
 import static_var as S
 import util as U
+from url import URL
 from pprint import pprint
 from dateutil.parser import isoparse
 
@@ -18,11 +19,26 @@ from dateutil.parser import isoparse
 MONGO_CLIENT = None
 
 
+def construct_mongo_url():
+    """ Construct URL for connecting to MongoDB."""
+    url = URL('')
+    if S.MONGO_CONFIG.host in ['127.0.0.1', 'localhost']:
+        url.scheme = 'mongodb'
+        url.netloc = f'{S.MONGO_CONFIG.host}:{S.MONGO_CONFIG.port}'
+    else:
+        url.scheme = 'mongodb+srv'
+        url.netloc = f'{S.MONGO_CONFIG.username}:{S.MONGO_CONFIG.password}@{S.MONGO_CONFIG.host}'
+        url.path = S.MONGO_CONFIG.database
+        url.query_param.set('retryWrites', 'true')
+        url.query_param.set('w', 'majority')
+    return str(url)
+
+
 def connect() -> pymongo.database.Database:
     """ Connect to MongoDB."""
     global MONGO_CLIENT
     if MONGO_CLIENT is None:
-        MONGO_CLIENT = pymongo.MongoClient(S.MONGO_CONFIG.host, S.MONGO_CONFIG.port)
+        MONGO_CLIENT = pymongo.MongoClient(construct_mongo_url())
 
     database = MONGO_CLIENT[S.MONGO_CONFIG.database]
     return database
@@ -70,6 +86,24 @@ class TopcoderMongo:
     ]
 
     @classmethod
+    def filter_valid_docvec_query(
+        cls,
+        similarity_threshold: typing.Optional[float] = None,
+        frequency_threshold: typing.Optional[float] = None,
+        token_len_threshold: int = 0,
+    ):
+        """ Query for challenges with valid docvec."""
+        return {
+            '$match': {
+                (f'docvec_'
+                    f'sim{similarity_threshold and int(similarity_threshold * 100)}'
+                    f'freq{frequency_threshold and int(frequency_threshold * 100)}'
+                    f'tkl{token_len_threshold}'): {'$exists': True},
+                'top2_prize': {'$gt': 0},
+            },
+        }
+
+    @classmethod
     def run_challenge_aggregation(self, query: list[dict]) -> typing.Any:
         """ Run mongo aggregation"""
         try:
@@ -87,6 +121,17 @@ class TopcoderMongo:
             result = self.project.aggregate(query)
         except pymongo.errors.OperationFailure as e:
             print('Project aggregation failed. Details:')
+            pprint(e.details)
+        else:
+            return result
+
+    @classmethod
+    def run_feature_aggregation(self, query: list[dict]) -> typing.Any:
+        """ Run mongo aggregation"""
+        try:
+            result = self.feature.aggregate(query)
+        except pymongo.errors.OperationFailure as e:
+            print('Feature aggregation failed. Details:')
             pprint(e.details)
         else:
             return result
@@ -428,7 +473,10 @@ class TopcoderMongo:
                 {'id': cha_id},
                 {'$set': {
                     'id': cha_id,
-                    f'docvec_sim{similarity_threshold}freq{frequency_threshold}tkl{token_len_threshold}': cha_docvec
+                    (f'docvec_'
+                        f'sim{similarity_threshold and int(similarity_threshold * 100)}'
+                        f'freq{frequency_threshold and int(frequency_threshold * 100)}'
+                        f'tkl{token_len_threshold}'): cha_docvec
                 }},
                 upsert=True,
             )
