@@ -469,7 +469,7 @@ class TopcoderMongo:
                 {'id': row.id},
                 {'$set': {
                     'id': row.id,
-                    'metadata': [row.duration, row.project_id_encode, row.legacy_sub_track_encode],
+                    'metadata': [row.project_id_encode, row.legacy_sub_track_encode, row.duration],
                 }},
                 upsert=True,
             )
@@ -485,4 +485,4 @@ class TopcoderMongo:
 
 if __name__ == '__main__':
     # TopcoderMongo.write_training_feature()
-    TopcoderMongo.write_competing_challenges()
+    TopcoderMongo.write_metadata_feature()

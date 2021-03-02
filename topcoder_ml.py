@@ -7,6 +7,11 @@ import numpy as np
 import pandas as pd
 from gensim import corpora, models, similarities
 
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import GradientBoostingRegressor
+
 import topcoder_mongo as DB
 import util as U
 import static_var as S
@@ -100,7 +105,9 @@ def softmax(x: np.ndarray) -> np.ndarray:
 
 
 def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """ Retrieve engineered feature matrix X and y from database."""
+    """ Retrieve engineered feature matrix X and y from database.
+        The order of array concatenation: numeric -> one hot encoded -> docvec
+    """
     challenge_prize_query = [
         DB.TopcoderMongo.filter_valid_docvec_query(),
         {'$project': {'_id': False, 'id': True, 'top2_prize': True}},
@@ -111,29 +118,25 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
             '_id': False, 'id': True,
             'vector': {
                 '$concatArrays': [
-                    f'${S.DV_FEATURE_NAME}',
-                    '$softmax',
-                    '$one_hot',
                     '$metadata',
                     ['$num_of_competing_challenges'],
+                    '$softmax',
+                    '$one_hot',
+                    f'${S.DV_FEATURE_NAME}',
                 ],
             },
         }},
     ]
-    challenge_feature_columns = (
-        [f'dv{i}' for i in range(100)] +
-        [f'softmax_c{i + 1}' for i in range(4)] + [f'ohe{i}' for i in range(100)] +
-        ['duration', 'project_id', 'sub_track', 'num_of_competing_challenges'])
     challenge_prize = (pd.DataFrame
                         .from_records(DB.TopcoderMongo.run_feature_aggregation(challenge_prize_query))
                         .set_index('id'))
     challenge_feature = (pd.DataFrame
                         .from_records((DB.TopcoderMongo.run_feature_aggregation(challenge_feature_query)))
                         .set_index('id'))
-    challenge_feature = pd.DataFrame.from_records(
-        data=challenge_feature.vector,
-        index=challenge_feature.index,
-    ).rename(columns=dict(enumerate(challenge_feature_columns)))
+    challenge_feature = (pd.DataFrame
+                        .from_records(data=challenge_feature.vector, index=challenge_feature.index)
+                        .rename(columns=dict(enumerate(S.FEATURE_MATRIX_COLUMNS)))
+                        .reindex(S.FEATURE_MATRIX_REINDEX, axis=1))
 
     feature_and_target = challenge_feature.join(challenge_prize)
 
@@ -155,7 +158,59 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     )
 
 
-def get_split_data(test_size: float = 0.3):
-    """ Return the **challenge id list** for train-test data set split."""
+def get_challenge_prize_range() -> pd.DataFrame:
+    """ Return the challenge id list with tag of prize range."""
     feature, target = get_training_data()
     target_min, target_max = target['top2_prize'].min(), target['top2_prize'].max()
+    target_challenge = target.index.tolist()
+
+    prize_interval_points = np.linspace(target_min, target_max, int((target_max - target_min) / 50) + 1)
+    branch_query = [{
+        'case': {'$and': [
+            {'$gte': ['$top2_prize', intv_start]},
+            {'$lte' if intv_end == prize_interval_points[-1] else '$lt': ['$top2_prize', intv_end]}]},
+        'then': f'[{intv_start}, {intv_end}' + (']' if intv_end == prize_interval_points[-1] else ')'),
+    } for intv_start, intv_end in zip(prize_interval_points, prize_interval_points[1:])]
+
+    query = [
+        DB.TopcoderMongo.filter_valid_docvec_query(),
+        {'$set': {'prize_range': {'$switch': {'branches': branch_query, 'default': 'out_of_range'}}}},
+        {'$match': {'prize_range': {'$ne': 'out_of_range'}, 'id': {'$in': target_challenge}}},
+        {'$group': {
+            '_id': {'prize_range': '$prize_range'},
+            'challenge_ids': {'$push': '$id'},
+        }},
+        {'$replaceRoot': {'newRoot': {'$mergeObjects': ['$_id', {'challenge_ids': '$challenge_ids'}]}}},
+    ]
+
+    return pd.concat([
+        pd.DataFrame({'id': doc['challenge_ids'], 'prize_range': doc['prize_range']})
+        for doc in DB.TopcoderMongo.run_feature_aggregation(query)
+    ]).reset_index(drop=True)
+
+
+def get_train_test_index(test_size: float = 0.15) -> tuple[list[str], list[str]]:
+    """ Get the training and testing challenge id list."""
+    challenge_prize_range = get_challenge_prize_range()
+    test_challenge_id: list[str] = (challenge_prize_range.groupby('prize_range')
+                                                                .sample(frac=test_size, random_state=42)
+                                                                .loc[:, 'id']
+                                                                .to_list())
+    train_challenge_id: list[str] = (challenge_prize_range
+                                        .loc[~challenge_prize_range['id'].isin(test_challenge_id)]['id']
+                                        .to_list())
+
+    return train_challenge_id, test_challenge_id
+
+
+def construct_training_pipeline() -> Pipeline:
+    """ Construct a sklearn.pipeline.Pipeline with ColumnTransformer.
+        Potentially more 
+    """
+    return Pipeline([
+        ('col', ColumnTransformer(
+            [('standardization', StandardScaler(), S.NUMERIC_FEATURES)],
+            remainder='passthrough',
+        )),
+        ('gbr', GradientBoostingRegressor(random_state=42)),
+    ])

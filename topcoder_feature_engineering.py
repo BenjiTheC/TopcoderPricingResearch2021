@@ -121,9 +121,9 @@ def compute_challenge_desc_docvec() -> dict[str, list]:
 
 def compute_challenge_metadata() -> pd.DataFrame:
     """ Compute challenge metadata:
-        - Challenge duration (by full days)
-        - Project id (categorically encoded)
-        - Legacy sub track (categorically encoded)
+        - Challenge duration (by full days), numeric data
+        - Project id (categorically encoded), categorical data
+        - Legacy sub track (categorically encoded), categorical data
     """
     proj_id_query = [
         *DB.TopcoderMongo.scoped_challenge_with_text_query,

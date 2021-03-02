@@ -35,6 +35,17 @@ DV_MODEL_NAME = 'challenge_desc_docvecs_sim{similarity}freq{frequency}tkl{token_
     token_len=DOC2VEC_CONFIG.token_length,
 )
 
+FEATURE_MATRIX_COLUMNS = (
+    ['project_id', 'sub_track', 'duration', 'num_of_competing_challenges'] +
+    [f'softmax_c{i + 1}' for i in range(4)] + 
+    [f'ohe{i}' for i in range(100)] + [f'dv{i}' for i in range(100)]
+)
+NUMERIC_FEATURES = ['duration', 'num_of_competing_challenges', *[f'softmax_c{i + 1}' for i in range(4)]]
+FEATURE_MATRIX_REINDEX = (  # Move numeric feature columns to the front so the order is intact from ColumnsTransformer
+    NUMERIC_FEATURES + ['project_id', 'sub_track'] +
+    [f'ohe{i}' for i in range(100)] + [f'dv{i}' for i in range(100)]
+)
+
 # Some meta data from topcoder.com, manually written here because it's pretty short
 DETAILED_STATUS = [
     'New',
