@@ -34,7 +34,6 @@ DV_MODEL_NAME = 'challenge_desc_docvecs_sim{similarity}freq{frequency}tkl{token_
     frequency=DOC2VEC_CONFIG.frequency,
     token_len=DOC2VEC_CONFIG.token_length,
 )
-
 FEATURE_MATRIX_COLUMNS = (
     ['project_id', 'sub_track', 'duration', 'num_of_competing_challenges'] +
     [f'softmax_c{i + 1}' for i in range(4)] + 

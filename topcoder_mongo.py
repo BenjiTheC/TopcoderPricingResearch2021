@@ -482,7 +482,6 @@ class TopcoderMongo:
         for challenge in FE.compute_competing_challenges():
             cls.feature.update_one({'id': challenge['id']}, {'$set': challenge}, upsert=True)
 
-
 if __name__ == '__main__':
     # TopcoderMongo.write_training_feature()
     TopcoderMongo.write_metadata_feature()

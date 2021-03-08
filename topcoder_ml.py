@@ -1,7 +1,7 @@
 """ Natural Language Processing logic for building the price model."""
 import pathlib
 import itertools
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -11,14 +11,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.base import BaseEstimator
 
 import topcoder_mongo as DB
 import util as U
 import static_var as S
 
+
 def get_ngrams(s: str, n: int) -> list[str]:
     """ Get N-gram from a string."""
     return [''.join(gram) for gram in zip(*[s[i:] for i in range(n)])]
+
 
 def group_challenge_tags() -> tuple[dict, corpora.Dictionary, similarities.SparseMatrixSimilarity]:
     """ Use TF-IDF model to group the tag that are similar.
@@ -102,6 +105,11 @@ def challenge_tag_word2vec() -> tuple[dict, dict, models.Word2Vec]:
 def softmax(x: np.ndarray) -> np.ndarray:
     """ Compute softmax values for the array."""
     return np.exp(x) / np.sum(np.exp(x))
+
+
+def mean_magnitude_of_relative_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """ Return the single float of MMRE."""
+    return np.mean(np.abs(y_pred - y_true) / y_true)
 
 
 def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -203,7 +211,11 @@ def get_train_test_index(test_size: float = 0.15) -> tuple[list[str], list[str]]
     return train_challenge_id, test_challenge_id
 
 
-def construct_training_pipeline() -> Pipeline:
+def construct_training_pipeline(
+    estimator: BaseEstimator = GradientBoostingRegressor,
+    est_name: str = 'est',
+    est_param: dict = {},
+) -> Pipeline:
     """ Construct a sklearn.pipeline.Pipeline with ColumnTransformer.
         Potentially more 
     """
@@ -212,5 +224,5 @@ def construct_training_pipeline() -> Pipeline:
             [('standardization', StandardScaler(), S.NUMERIC_FEATURES)],
             remainder='passthrough',
         )),
-        ('gbr', GradientBoostingRegressor(random_state=42)),
+        (est_name, estimator(**est_param)),
     ])
