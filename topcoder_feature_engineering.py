@@ -49,9 +49,9 @@ def get_tag_combination_softmax() -> list[pd.DataFrame]:
     """
     def compute_softmax(tag_combination: pd.DataFrame):
         """ Calculate softmax for tag combination DataFrame."""
-        top25 = tag_combination.head(25).copy()
-        top25['count_softmax'] = TML.softmax(np.log(top25['count']))
-        return top25
+        top_n = tag_combination.head(S.CHALLENGE_TAG_COMB_TOP).copy()
+        top_n['count_softmax'] = TML.softmax(np.log(top_n['count']))
+        return top_n
 
     return [compute_softmax(tag_combination) for tag_combination in get_challenge_tag_combination_count()]
 
@@ -76,8 +76,8 @@ def compute_tag_feature() -> list[dict]:
             softmax_score = tc_softmax.loc[tc_softmax['tag'].isin(tc_lst), 'count_softmax'].sum()
             one_hot_array = tc_softmax['tag'].isin(tc_lst).astype(int).to_numpy()
             feature_dct.update({
-                f'tag_comb{comb_r}_softmax_score': softmax_score,
-                f'tag_comb{comb_r}_one_hot_array': one_hot_array,
+                f'tag_comb{comb_r}_dim{S.CHALLENGE_TAG_OHE_DIM}_softmax_score': softmax_score,
+                f'tag_comb{comb_r}_dim{S.CHALLENGE_TAG_OHE_DIM}_one_hot_array': one_hot_array,
             })
         return feature_dct
 
@@ -103,7 +103,7 @@ def train_challenge_desc_doc2vec() -> tuple[Doc2Vec, list[TaggedDocument]]:
     if model_path.exists():
         return Doc2Vec.load(str(model_path.resolve())), corpus
 
-    model = Doc2Vec(vector_size=100, min_count=5, epochs=10)
+    model = Doc2Vec(vector_size=S.DOC2VEC_CONFIG.dimension, min_count=5, epochs=10)
     model.build_vocab(corpus)
     model.train(corpus, total_examples=model.corpus_count, epochs=model.epochs)
     model.save(str(model_path.resolve()))

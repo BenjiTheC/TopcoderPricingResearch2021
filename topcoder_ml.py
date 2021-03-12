@@ -1,7 +1,7 @@
 """ Natural Language Processing logic for building the price model."""
 import pathlib
 import itertools
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
@@ -35,7 +35,7 @@ def group_challenge_tags() -> tuple[dict, corpora.Dictionary, similarities.Spars
             'status': 'Completed',
             'track': 'Development',
             'type': 'Challenge',
-            'end_date': {'$lte': U.year_end(2020)},     
+            'end_date': {'$lte': U.year_end(2020)},
         }},
         {'$unwind': '$tags'},
         {'$group': {'_id': {'tag': '$tags'}, 'tag': {'$first': '$tags'}}},
@@ -128,31 +128,31 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
                 '$concatArrays': [
                     '$metadata',
                     ['$num_of_competing_challenges'],
-                    '$softmax',
-                    '$one_hot',
+                    f'$softmax_dim{S.CHALLENGE_TAG_OHE_DIM}',
+                    f'$one_hot_dim{S.CHALLENGE_TAG_OHE_DIM}',
                     f'${S.DV_FEATURE_NAME}',
                 ],
             },
         }},
     ]
     challenge_prize = (pd.DataFrame
-                        .from_records(DB.TopcoderMongo.run_feature_aggregation(challenge_prize_query))
-                        .set_index('id'))
+                       .from_records(DB.TopcoderMongo.run_feature_aggregation(challenge_prize_query))
+                       .set_index('id'))
     challenge_feature = (pd.DataFrame
-                        .from_records((DB.TopcoderMongo.run_feature_aggregation(challenge_feature_query)))
-                        .set_index('id'))
+                         .from_records((DB.TopcoderMongo.run_feature_aggregation(challenge_feature_query)))
+                         .set_index('id'))
     challenge_feature = (pd.DataFrame
-                        .from_records(data=challenge_feature.vector, index=challenge_feature.index)
-                        .rename(columns=dict(enumerate(S.FEATURE_MATRIX_COLUMNS)))
-                        .reindex(S.FEATURE_MATRIX_REINDEX, axis=1))
+                         .from_records(data=challenge_feature.vector, index=challenge_feature.index)
+                         .rename(columns=dict(enumerate(S.FEATURE_MATRIX_COLUMNS)))
+                         .reindex(S.FEATURE_MATRIX_REINDEX, axis=1))
 
     feature_and_target = challenge_feature.join(challenge_prize)
 
-    prize_lower_bound = challenge_prize['top2_prize'].quantile(0.05) 
+    prize_lower_bound = challenge_prize['top2_prize'].quantile(0.05)
     prize_upper_bound = challenge_prize['top2_prize'].quantile(0.95)
     challenge_by_project_scale: list[str] = (pd.DataFrame.from_records(DB.TopcoderMongo.get_project_scale([0, 10]))
-                                                .set_index('tag')
-                                                .loc['>=10', 'challenge_lst'])
+                                             .set_index('tag')
+                                             .loc['>=10', 'challenge_lst'])
 
     selected_feature_and_target = feature_and_target.loc[
         (feature_and_target['top2_prize'] >= prize_lower_bound) &
@@ -167,7 +167,11 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def get_challenge_prize_range() -> pd.DataFrame:
-    """ Return the challenge id list with tag of prize range."""
+    """ Return the challenge id list with tag of prize range.
+        This function is written to aggregate the challenge by prize range, and eventually
+        using the prize range to split the dataset. However, this approach assume that we
+        "know" the testing dataset distribution and is wrong, so it shoud NOT be used.
+    """
     feature, target = get_training_data()
     target_min, target_max = target['top2_prize'].min(), target['top2_prize'].max()
     target_challenge = target.index.tolist()
@@ -198,15 +202,19 @@ def get_challenge_prize_range() -> pd.DataFrame:
 
 
 def get_train_test_index(test_size: float = 0.15) -> tuple[list[str], list[str]]:
-    """ Get the training and testing challenge id list."""
+    """ Get the training and testing challenge id list.
+        This function is written to group and resample the testing dataset. However, this
+        approach assume that we "know" the testing dataset distribution and is wrong, so
+        it shoud NOT be used.
+    """
     challenge_prize_range = get_challenge_prize_range()
     test_challenge_id: list[str] = (challenge_prize_range.groupby('prize_range')
-                                                                .sample(frac=test_size, random_state=42)
-                                                                .loc[:, 'id']
-                                                                .to_list())
+                                                         .sample(frac=test_size, random_state=42)
+                                                         .loc[:, 'id']
+                                                         .to_list())
     train_challenge_id: list[str] = (challenge_prize_range
-                                        .loc[~challenge_prize_range['id'].isin(test_challenge_id)]['id']
-                                        .to_list())
+                                     .loc[~challenge_prize_range['id'].isin(test_challenge_id)]['id']
+                                     .to_list())
 
     return train_challenge_id, test_challenge_id
 
@@ -217,7 +225,7 @@ def construct_training_pipeline(
     est_param: dict = {},
 ) -> Pipeline:
     """ Construct a sklearn.pipeline.Pipeline with ColumnTransformer.
-        Potentially more 
+        Potentially more
     """
     return Pipeline([
         ('col', ColumnTransformer(

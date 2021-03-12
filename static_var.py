@@ -8,7 +8,6 @@ load_dotenv()
 DATA_PATH = pathlib.Path('data')
 MODEL_PATH = pathlib.Path('models')
 
-# Hardcode the mongoDB info here, .env or other environmental variable should be used for remote database
 MongoConfig = namedtuple('MongoConfig', ['host', 'port', 'username', 'password', 'database'])
 MONGO_CONFIG = MongoConfig(
     host=os.getenv("MONGO_HOST"),
@@ -18,31 +17,37 @@ MONGO_CONFIG = MongoConfig(
     database=os.getenv("MONGO_DATABASE"),
 )
 
-Doc2VecConfig = namedtuple('Doc2VecConfig', ['similarity', 'frequency', 'token_length'])
+Doc2VecConfig = namedtuple('Doc2VecConfig', ['similarity', 'frequency', 'token_length', 'dimension'])
 DOC2VEC_CONFIG = Doc2VecConfig(
     similarity=(os.getenv('CHALLENGE_DESC_SIMILARITY') and float(os.getenv('CHALLENGE_DESC_SIMILARITY'))) or None,
     frequency=(os.getenv('CHALLENGE_DESC_FREQUENCY') and float(os.getenv('CHALLENGE_DESC_FREQUENCY'))) or None,
     token_length=(os.getenv('CHALLENGE_DESC_TOKEN_LEN') and int(os.getenv('CHALLENGE_DESC_TOKEN_LEN'))) or 0,
+    dimension=(os.getenv('DOCVEC_DIM') and int(os.getenv('DOCVEC_DIM'))),
 )
-DV_FEATURE_NAME = 'docvec_sim{similarity}freq{frequency}tkl{token_len}'.format(
+DV_FEATURE_NAME = 'docvec_sim{similarity}freq{frequency}tkl{token_len}dim{dimension}'.format(
     similarity=DOC2VEC_CONFIG.similarity and int(DOC2VEC_CONFIG.similarity * 100),
     frequency=DOC2VEC_CONFIG.frequency and int(DOC2VEC_CONFIG.frequency * 100),
     token_len=DOC2VEC_CONFIG.token_length,
+    dimension=DOC2VEC_CONFIG.dimension,
 )
-DV_MODEL_NAME = 'challenge_desc_docvecs_sim{similarity}freq{frequency}tkl{token_len}'.format(
+DV_MODEL_NAME = 'challenge_desc_docvecs_sim{similarity}freq{frequency}tkl{token_len}dim{dimension}'.format(
     similarity=DOC2VEC_CONFIG.similarity,
     frequency=DOC2VEC_CONFIG.frequency,
     token_len=DOC2VEC_CONFIG.token_length,
+    dimension=DOC2VEC_CONFIG.dimension,
 )
+CHALLENGE_TAG_OHE_DIM = os.getenv('TAG_OHE_DIM') and int(os.getenv('TAG_OHE_DIM'))
+CHALLENGE_TAG_COMB_TOP = CHALLENGE_TAG_OHE_DIM // 4
+
 FEATURE_MATRIX_COLUMNS = (
     ['project_id', 'sub_track', 'duration', 'num_of_competing_challenges'] +
-    [f'softmax_c{i + 1}' for i in range(4)] + 
+    [f'softmax_c{i + 1}' for i in range(4)] +
     [f'ohe{i}' for i in range(100)] + [f'dv{i}' for i in range(100)]
 )
 NUMERIC_FEATURES = ['duration', 'num_of_competing_challenges', *[f'softmax_c{i + 1}' for i in range(4)]]
 FEATURE_MATRIX_REINDEX = (  # Move numeric feature columns to the front so the order is intact from ColumnsTransformer
     NUMERIC_FEATURES + ['project_id', 'sub_track'] +
-    [f'ohe{i}' for i in range(100)] + [f'dv{i}' for i in range(100)]
+    [f'ohe{i}' for i in range(CHALLENGE_TAG_OHE_DIM)] + [f'dv{i}' for i in range(DOC2VEC_CONFIG.dimension)]
 )
 
 # Some meta data from topcoder.com, manually written here because it's pretty short

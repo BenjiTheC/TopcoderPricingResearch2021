@@ -129,7 +129,12 @@ class TopcoderMongo:
             return result
 
     @classmethod
-    def get_challenge_count(cls, granularity: str = 'year', fmt: str = '%Y', status_filter: list[str] = S.STATUS) -> list[dict]:
+    def get_challenge_count(
+        cls,
+        granularity: str = 'year',
+        fmt: str = '%Y',
+        status_filter: list[str] = S.STATUS
+    ) -> list[dict]:
         """ Get the overview count of challenges by year/month/other granularity."""
         query = [
             {'$match': {'end_date': {'$lte': U.year_end(2020)}}},
@@ -401,9 +406,10 @@ class TopcoderMongo:
         ])
 
     @classmethod
-    def write_training_feature(cls) -> None:
+    def write_training_feature(cls, drop_before_write: bool = True) -> None:
         """ Bundle the writing method for `feature` collections."""
-        cls.feature.drop()
+        if drop_before_write:
+            cls.feature.drop()
         cls.write_prize_target()
         cls.write_tag_feature()
         cls.write_docvec_feature()
@@ -438,9 +444,15 @@ class TopcoderMongo:
                 {'id': row['id']},
                 {'$set': {
                     'id': row['id'],
-                    'softmax': row.reindex([f'tag_comb{i}_softmax_score' for i in range(1, 5)]).tolist(),
-                    'one_hot': np.concatenate(row.reindex(
-                        [f'tag_comb{i}_one_hot_array' for i in range(1, 5)]).to_numpy()).tolist(),
+                    f'softmax_dim{S.CHALLENGE_TAG_OHE_DIM}': row.reindex(
+                        [f'tag_comb{i}_dim{S.CHALLENGE_TAG_OHE_DIM}_softmax_score' for i in range(1, 5)]).tolist(),
+                    f'one_hot_dim{S.CHALLENGE_TAG_OHE_DIM}':
+                        np.concatenate(
+                            row.reindex([
+                                f'tag_comb{i}_dim{S.CHALLENGE_TAG_OHE_DIM}_one_hot_array'
+                                for i in range(1, 5)
+                            ]).to_numpy()
+                        ).tolist(),
                 }},
                 upsert=True,
             )
@@ -482,6 +494,6 @@ class TopcoderMongo:
         for challenge in FE.compute_competing_challenges():
             cls.feature.update_one({'id': challenge['id']}, {'$set': challenge}, upsert=True)
 
+
 if __name__ == '__main__':
-    # TopcoderMongo.write_training_feature()
-    TopcoderMongo.write_metadata_feature()
+    TopcoderMongo.write_training_feature()
