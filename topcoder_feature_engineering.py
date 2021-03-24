@@ -211,3 +211,76 @@ def compute_competing_challenges() -> list[dict]:
         {'id': cha_id, **(empty_competing_cha if competing_cha == [] else competing_cha[0])}
         for cha_id, competing_cha in competing_challenges.items()
     ]
+
+
+def compute_detailed_global_context() -> Iterator:
+    """ Use the computed competing challenge data to compute detailed global context."""
+    query = [
+        {'$lookup': {
+            'from': 'challenge',
+            'let': {'id': '$id'},
+            'pipeline': [
+                {'$match': {'$expr': {'$eq': ['$id', '$$id']}}},
+                {'$project': {
+                    '_id': False, 'project_id': True, 'tags': True,
+                    'sub_track': '$legacy.sub_track',
+                }},
+            ],
+            'as': 'challenge_detail',
+        }},
+        {'$lookup': {
+            'from': 'challenge',
+            'let': {'id_lst': '$competing_challenge_ids'},
+            'pipeline': [
+                {'$match': {'$expr': {'$in': ['$id', '$$id_lst']}}},
+                {'$project': {
+                    '_id': False, 'id': True, 'project_id': True, 'tags': True,
+                    'sub_track': '$legacy.sub_track',
+                }},
+            ],
+            'as': 'competing_challenge_details',
+        }},
+        {'$unwind': '$challenge_detail'},
+        {'$project': {
+            '_id': False, 'id': True,
+            'competing_same_proj': {
+                '$size': {
+                    '$filter': {
+                        'input': '$competing_challenge_details',
+                        'as': 'c',
+                        'cond': {'$eq': ['$challenge_detail.project_id', '$$c.project_id']},
+                    },
+                },
+            },
+            'competing_same_sub_track': {
+                '$size': {
+                    '$filter': {
+                        'input': '$competing_challenge_details',
+                        'as': 'c',
+                        'cond': {'$eq': ['$challenge_detail.sub_track', '$$c.sub_track']},
+                    },
+                },
+            },
+            'competing_avg_overlapping_tags': {
+                '$ifNull': [
+                    {'$avg': {
+                        '$map': {
+                            'input': '$competing_challenge_details',
+                            'as': 'c',
+                            'in': {
+                                '$size': {
+                                    '$filter': {
+                                        'input': '$$c.tags',
+                                        'as': 't',
+                                        'cond': {'$in': ['$$t', '$challenge_detail.tags']},
+                                    },
+                                },
+                            },
+                        },
+                    }},
+                    0,
+                ],
+            },
+        }},
+    ]
+    return iter(DB.TopcoderMongo.run_feature_aggregation(query))

@@ -1,6 +1,11 @@
 """ Some utility functions."""
+import json
 import logging
 import pathlib
+import typing
+from itertools import islice
+from collections import deque
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 
@@ -41,3 +46,28 @@ def replace_word_by_keyword(keyword: str, replacement: str, target_lst: list[str
         element contains `keyword` string.
     """
     return [replacement if keyword.lower() in el.lower() else el for el in target_lst]
+
+
+def json_list_append(obj: typing.Any, path: pathlib.Path):
+    """ Append an JSON-able object to the end of a json file.
+        **USE WITH CAUSION**: It's only okay to use this function of very small amount of data.
+    """
+    json_lst: list = []
+    if path.is_file():
+        with open(path) as fjson:
+            json_lst = json.load(fjson)
+
+    json_lst.append(obj)
+    with open(path, 'w') as fjson:
+        json.dump(json_lst, fjson, indent=4)
+
+
+def slide_window(iterable: Iterable, size: int = 2) -> typing.Generator[list, None, None]:
+    """ Sliding window for arbitrary iterable."""
+    iterator = iter(iterable)
+    window = deque(islice(iterator, size), maxlen=size)  # `islice` iterate the iterator directly, not making copy
+    for element in iterator:
+        yield list(window)
+        window.append(element)  # Automatically pop left most item
+    if window:
+        yield list(window)

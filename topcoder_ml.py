@@ -1,105 +1,25 @@
 """ Natural Language Processing logic for building the price model."""
 import pathlib
-import itertools
-from collections.abc import Iterable
+import argparse
+from pprint import pprint
+from itertools import chain
 
 import numpy as np
 import pandas as pd
-from gensim import corpora, models, similarities
+from gensim.utils import simple_preprocess
+from gensim.sklearn_api import D2VTransformer
 
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, FunctionTransformer
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.base import BaseEstimator
+from sklearn.model_selection import cross_val_score, ShuffleSplit
+from sklearn.metrics import make_scorer
 
 import topcoder_mongo as DB
 import util as U
 import static_var as S
-
-
-def get_ngrams(s: str, n: int) -> list[str]:
-    """ Get N-gram from a string."""
-    return [''.join(gram) for gram in zip(*[s[i:] for i in range(n)])]
-
-
-def group_challenge_tags() -> tuple[dict, corpora.Dictionary, similarities.SparseMatrixSimilarity]:
-    """ Use TF-IDF model to group the tag that are similar.
-        Perfect example of over-engineering.
-
-        And it's not working so forget about it...
-    """
-
-    query = [
-        {'$match': {
-            'status': 'Completed',
-            'track': 'Development',
-            'type': 'Challenge',
-            'end_date': {'$lte': U.year_end(2020)},
-        }},
-        {'$unwind': '$tags'},
-        {'$group': {'_id': {'tag': '$tags'}, 'tag': {'$first': '$tags'}}},
-        {'$project': {'_id': False}},
-    ]
-    unique_tags: list[str] = [tag['tag'] for tag in DB.TopcoderMongo.run_challenge_aggregation(query)]
-    unique_tags.remove('Other')  # 'Other' tag is meaningless
-
-    unique_tags_no_space: list[str] = [''.join(tag.lower().split()) for tag in unique_tags]
-    unique_tags_multigram: list[Iterable[str]] = [
-        list(itertools.chain(*[get_ngrams(tag, i) for i in range(3)])) for tag in unique_tags_no_space
-    ]
-
-    # tag_to_multigram = dict(zip(unique_tags, unique_tags_multigram))
-    grams_to_id = corpora.Dictionary(unique_tags_multigram)
-    unique_tags_bow = [grams_to_id.doc2bow(multigram) for multigram in unique_tags_multigram]
-
-    tfidf = models.TfidfModel(unique_tags_bow, dictionary=grams_to_id)
-    unique_tags_tfidf = tfidf[unique_tags_bow]
-    similarity_index = similarities.SparseMatrixSimilarity(unique_tags_tfidf, num_features=len(grams_to_id))
-
-    tag_to_tfidf = dict(zip(unique_tags, unique_tags_tfidf))
-
-    return tag_to_tfidf, grams_to_id, similarity_index
-
-
-def challenge_tag_word2vec() -> tuple[dict, dict, models.Word2Vec]:
-    """ Train a Word2Vec model in the fields of challenge tags
-        Another perfect example of over engineering
-
-        Not very meaingful either....
-    """
-    model_path: pathlib.Path = pathlib.Path('./models/challenge_tag_word2vec')
-
-    tag_count_query = [
-        *DB.TopcoderMongo.scoped_challenge_query,
-        {'$unwind': '$tags'},
-        {'$group': {'_id': {'tag': '$tags'}, 'count': {'$sum': 1}}},
-        {'$replaceRoot': {'newRoot': {'$mergeObjects': ['$_id', {'count': '$count'}]}}},
-    ]
-    challenge_tag_query = [
-        *DB.TopcoderMongo.scoped_challenge_query,
-        {'$project': {'id': True, 'tags': True}},
-    ]
-
-    tag_count = {
-        tag['tag']: tag['count']
-        for tag in DB.TopcoderMongo.run_challenge_aggregation(tag_count_query)
-        if tag['count'] >= 5
-    }
-    challenge_tags = {
-        challenge['id']: sorted(tag for tag in challenge['tags'] if tag in tag_count and tag != 'Other')
-        for challenge in DB.TopcoderMongo.run_challenge_aggregation(challenge_tag_query)
-    }
-
-    if model_path.exists():
-        print('Returning existed model')
-        word2vec = models.Word2Vec.load(str(model_path.resolve()))
-    else:
-        print('Returning newly trained model')
-        word2vec = models.Word2Vec(sentences=challenge_tags.values(), workers=4)
-        word2vec.save(str(model_path.resolve()))
-
-    return tag_count, challenge_tags, word2vec
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
@@ -112,32 +32,45 @@ def mean_magnitude_of_relative_error(y_true: np.ndarray, y_pred: np.ndarray) -> 
     return np.mean(np.abs(y_pred - y_true) / y_true)
 
 
-def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+def get_training_data(
+    excluded_metadata: list = [],
+    excluded_global_context: list = [],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ Retrieve engineered feature matrix X and y from database.
         The order of array concatenation: numeric -> one hot encoded -> docvec
     """
     challenge_prize_query = [
-        DB.TopcoderMongo.filter_valid_docvec_query(),
         {'$project': {'_id': False, 'id': True, 'top2_prize': True}},
     ]
     challenge_feature_query = [
-        DB.TopcoderMongo.filter_valid_docvec_query(),
         {'$project': {
             '_id': False, 'id': True,
             'vector': {
                 '$concatArrays': [
                     '$metadata',
-                    ['$num_of_competing_challenges'],
+                    [f'${col}' for col in S.GLOBAL_CONTEXT_COLUMNS],
                     f'$softmax_dim{S.CHALLENGE_TAG_OHE_DIM}',
                     f'$one_hot_dim{S.CHALLENGE_TAG_OHE_DIM}',
-                    f'${S.DV_FEATURE_NAME}',
                 ],
             },
         }},
     ]
+
+    # get the challenge description text and process it into tokens
+    challenge_desc: pd.DataFrame = (pd.DataFrame
+                                    .from_records(DB.TopcoderMongo.get_challenge_description())
+                                    .set_index('id'))
+    challenge_desc['tokens'] = challenge_desc['processed_paragraph'].apply(simple_preprocess)
+    challenge_desc = (challenge_desc
+                      .loc[challenge_desc['tokens'].apply(lambda t: len(t) > S.DOC2VEC_CONFIG.token_length)]
+                      .reindex(['tokens'], axis=1)
+                      .rename(columns={'tokens': 'processed_paragraph'}))
+
     challenge_prize = (pd.DataFrame
                        .from_records(DB.TopcoderMongo.run_feature_aggregation(challenge_prize_query))
                        .set_index('id'))
+
+    # `vector` column is a Series of lists, so we need to `from_records` to flat out the matrix
     challenge_feature = (pd.DataFrame
                          .from_records((DB.TopcoderMongo.run_feature_aggregation(challenge_feature_query)))
                          .set_index('id'))
@@ -146,7 +79,8 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
                          .rename(columns=dict(enumerate(S.FEATURE_MATRIX_COLUMNS)))
                          .reindex(S.FEATURE_MATRIX_REINDEX, axis=1))
 
-    feature_and_target = challenge_feature.join(challenge_prize)
+    # challenge_desc can be potentially less than other features when `DOC2VEC_CONFIG.token_length` changes.
+    feature_and_target = challenge_desc.join(challenge_feature.join(challenge_prize))
 
     prize_lower_bound = challenge_prize['top2_prize'].quantile(0.05)
     prize_upper_bound = challenge_prize['top2_prize'].quantile(0.95)
@@ -161,76 +95,135 @@ def get_training_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     ]
 
     return (
-        selected_feature_and_target.reindex(challenge_feature.columns, axis=1),
+        selected_feature_and_target.reindex(
+            [col for col in S.FEATURE_MATRIX_COLUMNS
+             if col not in (excluded_metadata + excluded_global_context)] + ['processed_paragraph'],
+            axis=1,
+        ),
         selected_feature_and_target.reindex(['top2_prize'], axis=1),
     )
-
-
-def get_challenge_prize_range() -> pd.DataFrame:
-    """ Return the challenge id list with tag of prize range.
-        This function is written to aggregate the challenge by prize range, and eventually
-        using the prize range to split the dataset. However, this approach assume that we
-        "know" the testing dataset distribution and is wrong, so it shoud NOT be used.
-    """
-    feature, target = get_training_data()
-    target_min, target_max = target['top2_prize'].min(), target['top2_prize'].max()
-    target_challenge = target.index.tolist()
-
-    prize_interval_points = np.linspace(target_min, target_max, int((target_max - target_min) / 50) + 1)
-    branch_query = [{
-        'case': {'$and': [
-            {'$gte': ['$top2_prize', intv_start]},
-            {'$lte' if intv_end == prize_interval_points[-1] else '$lt': ['$top2_prize', intv_end]}]},
-        'then': f'[{intv_start}, {intv_end}' + (']' if intv_end == prize_interval_points[-1] else ')'),
-    } for intv_start, intv_end in zip(prize_interval_points, prize_interval_points[1:])]
-
-    query = [
-        DB.TopcoderMongo.filter_valid_docvec_query(),
-        {'$set': {'prize_range': {'$switch': {'branches': branch_query, 'default': 'out_of_range'}}}},
-        {'$match': {'prize_range': {'$ne': 'out_of_range'}, 'id': {'$in': target_challenge}}},
-        {'$group': {
-            '_id': {'prize_range': '$prize_range'},
-            'challenge_ids': {'$push': '$id'},
-        }},
-        {'$replaceRoot': {'newRoot': {'$mergeObjects': ['$_id', {'challenge_ids': '$challenge_ids'}]}}},
-    ]
-
-    return pd.concat([
-        pd.DataFrame({'id': doc['challenge_ids'], 'prize_range': doc['prize_range']})
-        for doc in DB.TopcoderMongo.run_feature_aggregation(query)
-    ]).reset_index(drop=True)
-
-
-def get_train_test_index(test_size: float = 0.15) -> tuple[list[str], list[str]]:
-    """ Get the training and testing challenge id list.
-        This function is written to group and resample the testing dataset. However, this
-        approach assume that we "know" the testing dataset distribution and is wrong, so
-        it shoud NOT be used.
-    """
-    challenge_prize_range = get_challenge_prize_range()
-    test_challenge_id: list[str] = (challenge_prize_range.groupby('prize_range')
-                                                         .sample(frac=test_size, random_state=42)
-                                                         .loc[:, 'id']
-                                                         .to_list())
-    train_challenge_id: list[str] = (challenge_prize_range
-                                     .loc[~challenge_prize_range['id'].isin(test_challenge_id)]['id']
-                                     .to_list())
-
-    return train_challenge_id, test_challenge_id
 
 
 def construct_training_pipeline(
     estimator: BaseEstimator = GradientBoostingRegressor,
     est_name: str = 'est',
     est_param: dict = {},
+    excluded_metadata: list = [],
+    excluded_global_context: list = [],
 ) -> Pipeline:
     """ Construct a sklearn.pipeline.Pipeline with ColumnTransformer.
         Potentially more
     """
     return Pipeline([
         ('col', ColumnTransformer(
-            [('standardization', StandardScaler(), S.NUMERIC_FEATURES)],
+            [
+                ('standardization',
+                 StandardScaler(),
+                 [col for col in S.NUMERIC_FEATURES if col not in (excluded_metadata + excluded_global_context)]),
+                ('doc2vec',
+                 Pipeline([
+                     ('txt_extraction', FunctionTransformer(lambda df: df['processed_paragraph'].to_list())),
+                     ('doc2vec', D2VTransformer(size=S.DOC2VEC_CONFIG.dimension, min_count=5, iter=10)),
+                 ]),
+                 ['processed_paragraph']),
+            ],
             remainder='passthrough',
         )),
         (est_name, estimator(**est_param)),
     ])
+
+
+def cross_validation_with_time_window(
+    feature: pd.DataFrame,
+    target: pd.DataFrame,
+    train_time_span: int = 1,
+) -> list[tuple[pd.Timestamp, np.float64]]:
+    """ Cross validate the model using specific time window."""
+    query = [
+        *DB.TopcoderMongo.scoped_challenge_with_text_query,
+        {'$group': {
+            '_id': {'$dateToString': {'format': '%Y-%m', 'date': '$end_date'}},
+            'id_lst': {'$addToSet': '$id'},
+        }},
+        {'$replaceRoot': {'newRoot': {
+            'month': '$_id',
+            'challenges': '$id_lst',
+        }}},
+    ]
+    challenge_by_month = (pd.DataFrame
+                          .from_records(DB.TopcoderMongo.run_challenge_aggregation(query))
+                          .set_index('month')
+                          .sort_index())
+    challenge_by_month.index = pd.to_datetime(challenge_by_month.index)
+
+    cv_scores = []
+    for time_window in U.slide_window(challenge_by_month.index, train_time_span + 1):
+        train_idx = list(chain.from_iterable(
+            challenge_by_month
+            .loc[time_window[:train_time_span], 'challenges']
+            .to_list()
+        ))
+        test_idx = challenge_by_month.loc[time_window[-1], 'challenges']
+
+        train_feature = feature.loc[feature.index.isin(train_idx)]
+        test_feature = feature.loc[feature.index.isin(test_idx)]
+
+        train_target = target.loc[target.index.isin(train_idx)]
+        test_target = target.loc[target.index.isin(test_idx)]
+
+        est = construct_training_pipeline(est_param=dict(random_state=42))
+        est.fit(train_feature, train_target.to_numpy().reshape(-1))
+        pred_target = est.predict(test_feature)
+        score = mean_magnitude_of_relative_error(test_target.to_numpy().reshape(-1), pred_target)
+
+        cv_scores.append((time_window[-1], score))
+
+    return cv_scores
+
+
+def command_line_cross_validate():
+    """ Function to call in shell to run cross validation."""
+    parser = argparse.ArgumentParser(description='Run cross validation of pricing model with different config')
+    parser.add_argument(
+        '--exclude-metadata', '-m',
+        dest='excluded_metadata',
+        nargs='*',
+        default=[],
+        help='Metadata features to exclude.',
+    )
+    parser.add_argument(
+        '--exclude-global-context', '-g',
+        dest='excluded_global_context',
+        nargs='*',
+        default=[],
+        help='Global context features to exclude.',
+    )
+    args = parser.parse_args()
+
+    feature, target = get_training_data(
+        excluded_metadata=args.excluded_metadata,
+        excluded_global_context=args.excluded_global_context,
+    )
+    score = np.abs(np.mean(cross_val_score(
+        construct_training_pipeline(
+            excluded_metadata=args.excluded_metadata,
+            excluded_global_context=args.excluded_global_context,
+        ),
+        feature, target.to_numpy().reshape(-1),
+        scoring=make_scorer(mean_magnitude_of_relative_error, greater_is_better=False),
+        cv=ShuffleSplit(n_splits=10, test_size=0.3, random_state=42),
+    )))
+
+    result = {
+        'excluded_metadata': args.excluded_metadata,
+        'excluded_global_context': args.excluded_global_context,
+        'tag_ohe_dimension': S.CHALLENGE_TAG_OHE_DIM,
+        'doc2vec_dimension': S.DOC2VEC_CONFIG.dimension,
+        'mmre': score,
+    }
+    pprint(result)
+    U.json_list_append(result, pathlib.Path('./cross_validation_result.json'))
+
+
+if __name__ == '__main__':
+    command_line_cross_validate()

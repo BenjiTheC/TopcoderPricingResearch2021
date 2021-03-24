@@ -39,16 +39,20 @@ DV_MODEL_NAME = 'challenge_desc_docvecs_sim{similarity}freq{frequency}tkl{token_
 CHALLENGE_TAG_OHE_DIM = os.getenv('TAG_OHE_DIM') and int(os.getenv('TAG_OHE_DIM'))
 CHALLENGE_TAG_COMB_TOP = CHALLENGE_TAG_OHE_DIM // 4
 
-FEATURE_MATRIX_COLUMNS = (
-    ['project_id', 'sub_track', 'duration', 'num_of_competing_challenges'] +
-    [f'softmax_c{i + 1}' for i in range(4)] +
-    [f'ohe{i}' for i in range(100)] + [f'dv{i}' for i in range(100)]
-)
-NUMERIC_FEATURES = ['duration', 'num_of_competing_challenges', *[f'softmax_c{i + 1}' for i in range(4)]]
-FEATURE_MATRIX_REINDEX = (  # Move numeric feature columns to the front so the order is intact from ColumnsTransformer
-    NUMERIC_FEATURES + ['project_id', 'sub_track'] +
-    [f'ohe{i}' for i in range(CHALLENGE_TAG_OHE_DIM)] + [f'dv{i}' for i in range(DOC2VEC_CONFIG.dimension)]
-)
+META_DATA_COLUMNS = ['project_id', 'sub_track', 'duration']
+GLOBAL_CONTEXT_COLUMNS = [
+    'num_of_competing_challenges',
+    'competing_same_proj',
+    'competing_same_sub_track',
+    'competing_avg_overlapping_tags',
+]
+TAG_SOFTMAX_COLUMNS = [f'softmax_c{i + 1}' for i in range(4)]
+TAG_OHE_COLUMNS = [f'ohe{i}' for i in range(CHALLENGE_TAG_OHE_DIM)]
+DOCVEC_COLUMNS = [f'dv{i}' for i in range(DOC2VEC_CONFIG.dimension)]
+FEATURE_MATRIX_COLUMNS = META_DATA_COLUMNS + GLOBAL_CONTEXT_COLUMNS + TAG_SOFTMAX_COLUMNS + TAG_OHE_COLUMNS
+NUMERIC_FEATURES = ['duration'] + GLOBAL_CONTEXT_COLUMNS + TAG_SOFTMAX_COLUMNS
+FEATURE_MATRIX_REINDEX = NUMERIC_FEATURES + ['project_id', 'sub_track'] + TAG_OHE_COLUMNS
+FEATURE_MATRIX_COLUMNS_WITH_DV = NUMERIC_FEATURES + DOCVEC_COLUMNS + ['project_id', 'sub_track'] + TAG_OHE_COLUMNS
 
 # Some meta data from topcoder.com, manually written here because it's pretty short
 DETAILED_STATUS = [

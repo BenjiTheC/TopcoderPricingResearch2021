@@ -56,7 +56,7 @@ class TopcoderMongo:
     project = get_collection('project')
     feature = get_collection('feature')
 
-    scoped_challenge_query = [  # This query select the 5,996 challenges fall into the scope
+    scoped_challenge_query = [
         {'$match': {
             'status': 'Completed',
             'track': 'Development',
@@ -68,11 +68,17 @@ class TopcoderMongo:
         }},
         {'$unwind': '$prize_sets'},
         {'$match': {'prize_sets.type': 'placement'}},
-        {'$set': {'num_of_placements': {'$size': '$prize_sets.prizes'}}},
-        {'$match': {'num_of_placements': {'$gt': 0}}},
+        {'$set': {
+            'num_of_placements': {'$size': '$prize_sets.prizes'},
+            'top2_prize': {'$sum': {'$slice': ['$prize_sets.prizes.value', 2]}},
+        }},
+        {'$match': {
+            'num_of_placements': {'$gt': 0},
+            'top2_prize': {'$gt': 0},
+        }},
     ]
 
-    scoped_challenge_with_text_query = [  # This query select the 3,316 challenges fall into the scope
+    scoped_challenge_with_text_query = [
         *scoped_challenge_query,
         {'$set': {'filtered_processed_desc': {
             '$filter': {
@@ -84,16 +90,6 @@ class TopcoderMongo:
         {'$set': {'size_of_filtered_processed_desc': {'$size': '$filtered_processed_desc'}}},
         {'$match': {'size_of_filtered_processed_desc': {'$gt': 0}}},
     ]
-
-    @classmethod
-    def filter_valid_docvec_query(cls) -> dict:
-        """ Query for challenges with valid docvec."""
-        return {
-            '$match': {
-                S.DV_FEATURE_NAME: {'$exists': True},
-                'top2_prize': {'$gt': 0},
-            },
-        }
 
     @classmethod
     def run_challenge_aggregation(self, query: list[dict]) -> typing.Any:
@@ -411,21 +407,20 @@ class TopcoderMongo:
         if drop_before_write:
             cls.feature.drop()
         cls.write_prize_target()
-        cls.write_tag_feature()
-        cls.write_docvec_feature()
+        # cls.write_tag_feature()  # NOTE: this method will be called independently in shell script
+        # cls.write_docvec_feature()  # NOTE: training DOC2VEC model should be done on *ONLY* training data
         cls.write_metadata_feature()
+        cls.write_competing_challenges()
 
     @classmethod
     def write_prize_target(cls) -> None:
         """ Write the training target Challenge top2 prize."""
         query = [
             *cls.scoped_challenge_with_text_query,
-            {'$unwind': '$prize_sets'},
-            {'$match': {'prize_sets.type': 'placement'}},
             {'$project': {
                 '_id': False,
                 'id': True,
-                'top2_prize': {'$sum': {'$slice': ['$prize_sets.prizes.value', 2]}},
+                'top2_prize': True,
             }},
         ]
         for challenge in cls.challenge.aggregate(query):
@@ -487,11 +482,14 @@ class TopcoderMongo:
             )
 
     @classmethod
-    def write_competing_challenges(cls):
+    def write_competing_challenges(cls) -> None:
         """ Write the competing challenge id list and number of competing challenges into database.
             This method takes longer to run than it looks ;-)
         """
         for challenge in FE.compute_competing_challenges():
+            cls.feature.update_one({'id': challenge['id']}, {'$set': challenge}, upsert=True)
+
+        for challenge in FE.compute_detailed_global_context():
             cls.feature.update_one({'id': challenge['id']}, {'$set': challenge}, upsert=True)
 
 

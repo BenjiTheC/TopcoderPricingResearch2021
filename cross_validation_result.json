@@ -1,0 +1,240 @@
+[
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.35355194199308976
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 200,
+        "mmre": 0.3548656986330362
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 300,
+        "mmre": 0.35614725256158775
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 400,
+        "mmre": 0.3522898230219855
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 500,
+        "mmre": 0.35568548516231635
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 200,
+        "doc2vec_dimension": 100,
+        "mmre": 0.3569148555036714
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 200,
+        "doc2vec_dimension": 200,
+        "mmre": 0.35450937700710217
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 200,
+        "doc2vec_dimension": 300,
+        "mmre": 0.35314295757150777
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 200,
+        "doc2vec_dimension": 400,
+        "mmre": 0.3524826269606277
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 200,
+        "doc2vec_dimension": 500,
+        "mmre": 0.3533879329416642
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 300,
+        "doc2vec_dimension": 100,
+        "mmre": 0.3564638319095963
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 300,
+        "doc2vec_dimension": 200,
+        "mmre": 0.353190498301928
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 300,
+        "doc2vec_dimension": 300,
+        "mmre": 0.35562933446156786
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 300,
+        "doc2vec_dimension": 400,
+        "mmre": 0.35357669762781324
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 300,
+        "doc2vec_dimension": 500,
+        "mmre": 0.35282832514255125
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 400,
+        "doc2vec_dimension": 100,
+        "mmre": 0.35819168908717286
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 400,
+        "doc2vec_dimension": 200,
+        "mmre": 0.35739525797963945
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 400,
+        "doc2vec_dimension": 300,
+        "mmre": 0.3548765565708344
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 400,
+        "doc2vec_dimension": 400,
+        "mmre": 0.3529897870978788
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 400,
+        "doc2vec_dimension": 500,
+        "mmre": 0.3534068943664886
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 500,
+        "doc2vec_dimension": 100,
+        "mmre": 0.35823397493787923
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 500,
+        "doc2vec_dimension": 200,
+        "mmre": 0.35544104166799617
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 500,
+        "doc2vec_dimension": 300,
+        "mmre": 0.3543527956236591
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 500,
+        "doc2vec_dimension": 400,
+        "mmre": 0.35421736219231753
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 500,
+        "doc2vec_dimension": 500,
+        "mmre": 0.35329536633965675
+    },
+    {
+        "excluded_metadata": [
+            "project_id"
+        ],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.3612593367881793
+    },
+    {
+        "excluded_metadata": [
+            "duration"
+        ],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.37510287856994845
+    },
+    {
+        "excluded_metadata": [
+            "sub_track"
+        ],
+        "excluded_global_context": [],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.35832596308335385
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [
+            "num_of_competing_challenges"
+        ],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.35799875659505154
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [
+            "competing_same_proj"
+        ],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.3561356442642356
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [
+            "competing_same_sub_track"
+        ],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.3571700930060369
+    },
+    {
+        "excluded_metadata": [],
+        "excluded_global_context": [
+            "competing_avg_overlapping_tags"
+        ],
+        "tag_ohe_dimension": 100,
+        "doc2vec_dimension": 100,
+        "mmre": 0.3586152599685985
+    }
+]
